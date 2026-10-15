@@ -197,6 +197,75 @@ SimpleFOC 库与自写代码混用时的状态干扰。必须重新设计集成�
 
 ---
 
+#### 阶段 2 实施记录（进行中）
+
+**集成方式（关键设计）**
+
+参考工程的 `MyProject.h` 会把 `iic.h` 一起包含进来，导致**库直接操作 I2C** ——
+而那个 I2C 驱动正是阶段 1 判定为"会卡死总线"的版本。
+
+所以本工程采用**隔离式集成**：
+
+| 文件 | 作用 |
+|---|---|
+| `app/MyProject.h` | **精简版**：去掉 iic.h/spi2.h，只保留库需要的类型、宏、全局变量声明 |
+| `app/encoder.c/.h` | 阶段 1 验证过的健壮 I2C 驱动 |
+| `app/foc_idle_test.c` | 把库的 `getAngle()`/`getVelocity()` 桥接到 `encoder.c` |
+| `app/SimpleFOC/*` | 库源码（原样复制，仅 include 指向精简版 MyProject.h） |
+| `app/Hardware/timer.c` `delay.c` | 原样复制 |
+
+**这样库永远不碰 I2C，只用我们验证过的接口。**
+
+**首次启动结果（✅ 不卡死）**
+
+```
+[1 s] angle=0.4602 vel=0.0000 Hz=1000 NaN=0 ok=4002 fail=0
+[2 s] angle=0.4602 vel=0.0000 Hz=1000 NaN=0 ok=8002 fail=0
+
+EN=OFF          ← 电机失能
+CCR 0/0/0       ← PWM 全零
+voltage.q=0.0000 voltage.d=0.0000
+NaN count=0
+encoder fail=0  abort=0  recover=0
+loop: 1000 Hz
+>>> HEALTHY
+```
+
+**发现并规避的一个严重隐患**
+
+`FOCMotor.c` 里 `voltage` 是**全局未初始化变量**：
+
+```c
+DQVoltage_s voltage;   /* 无初值！ */
+```
+
+而 `loopFOC()` 会**无条件**执行：
+
+```c
+setPhaseVoltage(voltage.q, voltage.d, electrical_angle);
+```
+
+⇒ 如果不在使能前显式清零，**上电第一次 `loopFOC()` 就会把随机值写进 PWM**！
+本固件已在 `motor_init` 后显式 `voltage.q = voltage.d = 0`。
+**这一点在阶段 3/4 使能电机前必须再次确认。**
+
+**实测到的两个待改进点（进入阶段 3 前处理）**
+
+1. **主循环只有 1 kHz**，瓶颈是编码器 I2C 读取
+   - 当前 `as5600_read_raw()` 分两次独立读（各含地址/寄存器/重复起始/停止）
+   - 改进：合并成**一次 2 字节读**，预计可翻倍到 ~2 kHz
+   - ⚠️ 注意：这属于**修改阶段 1 已验证的驱动**，必须重新跑
+     `T20000` 压测确认错误率仍为 0
+
+2. **`getVelocity()` 恒返回 0**（空转时无害，但闭环必需）
+   - 根因：用了未递增的毫秒计数器，`dt ≈ 0` 被下限截断
+   - 修复：改用 SysTick 自由计数时基
+     `dt = (0xFFFFFF - SysTick->VAL) 差值 / 9e6`（9MHz）
+   - 必须**先验证速度读数正确**（手动转轴看 vel 变化），再进阶段 4
+
+
+---
+
 ### 阶段 3 — 对齐（★ 最危险的一步，1 天）
 
 **目标**：让 `alignSensor()` 成功，得到 `sensor_direction` 与 `zero_electric_angle`

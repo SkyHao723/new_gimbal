@@ -25,6 +25,40 @@
 #include <stdlib.h>
 #include "encoder.h"
 
+/* ============================================================================
+ * 读接口抽象：支持运行时在【可信基线 encoder.c】和【加速版 encoder_fast.c】
+ * 之间切换，便于直接对比错误率与速度。
+ *   g_fast = 0 -> encoder.c      (两次独立传输, 阶段1已验证)
+ *   g_fast = 1 -> encoder_fast.c (一次 2 字节读, 待验证)
+ * ==========================================================================*/
+static uint8_t  g_fast = 0;
+static uint32_t g_reads = 0;          /* 供测速用 */
+
+/* 返回当前模式的统计结构 */
+static EncoderStats_t* st(void) { return g_fast ? &encf_stat : &enc_stat; }
+
+static int rd_checked(uint16_t *raw, uint16_t md, uint8_t rt)
+{
+	g_reads++;
+	return g_fast ? encoder_fast_read_checked(raw, md, rt)
+	              : rd_checked(raw, md, rt);
+}
+static int rd_raw(uint16_t *raw)
+{
+	g_reads++;
+	return g_fast ? encoder_fast_read_raw(raw) : encoder_read(raw, 1);
+}
+static void rd_reset(void)
+{
+	g_reads = 0;
+	if(g_fast) encoder_fast_reset_stats(); else rd_reset();
+}
+static void rd_init(uint32_t hz)
+{
+	if(g_fast) encoder_fast_init(hz); else rd_init(hz);
+}
+static uint32_t rd_speed(void) { return st()->speed_hz; }
+
 extern void RCC_Configuration(void);
 
 /* ---------------- 自包含串口 USART2 (PA2/PA3) ---------------- */
@@ -186,19 +220,19 @@ err:
 static void cmd_status(void)
 {
 	uint16_t raw = 0;
-	int r = encoder_read_checked(&raw, 20, 3);
+	int r = rd_checked(&raw, 20, 3);
 	printf("read=%s raw=%u angle=%.4f rad\r\n",
 		r ? "FAIL" : "OK", (unsigned)raw, encoder_raw_to_rad(raw));
 	printf("stat: ok=%lu fail=%lu checked=%lu outlier=%lu abort=%lu recover=%lu  speed=%luHz\r\n",
-		(unsigned long)enc_stat.ok, (unsigned long)enc_stat.fail,
-		(unsigned long)enc_stat.checked_ok, (unsigned long)enc_stat.outlier,
-		(unsigned long)enc_stat.abort, (unsigned long)enc_stat.recover,
-		(unsigned long)enc_stat.speed_hz);
+		(unsigned long)st()->ok, (unsigned long)st()->fail,
+		(unsigned long)st()->checked_ok, (unsigned long)st()->outlier,
+		(unsigned long)st()->abort, (unsigned long)st()->recover,
+		(unsigned long)st()->speed_hz);
 	{
-		uint32_t tot = enc_stat.ok + enc_stat.fail;
+		uint32_t tot = st()->ok + st()->fail;
 		if(tot)
 			printf("error rate = %.3f%%\r\n",
-				(double)enc_stat.fail * 100.0 / (double)tot);
+				(double)st()->fail * 100.0 / (double)tot);
 	}
 }
 
@@ -239,17 +273,17 @@ static void cmd_jitter(uint16_t n)
 {
 	uint16_t mn, mx, fl;
 	printf("jitter test: %u 次连续读...\r\n", (unsigned)n);
-	encoder_reset_stats();
+	rd_reset();
 	encoder_jitter_test(n, &mn, &mx, &fl);
 	{
-		uint32_t tot = enc_stat.ok + enc_stat.fail;
+		uint32_t tot = st()->ok + st()->fail;
 		printf("  结果: min=%u max=%u 跨度=%u LSB  失败=%u/%lu\r\n",
 			(unsigned)mn, (unsigned)mx, (unsigned)(mx-mn),
 			(unsigned)fl, (unsigned long)tot);
 		if(tot) printf("  错误率=%.3f%%  outlier=%lu abort=%lu recover=%lu\r\n",
-			(double)enc_stat.fail*100.0/(double)tot,
-			(unsigned long)enc_stat.outlier,(unsigned long)enc_stat.abort,
-			(unsigned long)enc_stat.recover);
+			(double)st()->fail*100.0/(double)tot,
+			(unsigned long)st()->outlier,(unsigned long)st()->abort,
+			(unsigned long)st()->recover);
 		printf("  判据: 静止时跨度应 < 5 LSB, 错误率 < 0.1%%\r\n");
 	}
 }
@@ -263,35 +297,65 @@ static void cmd_stress(uint32_t n)
 
 	if(report == 0) report = 1;
 	rx_sta = 0;                 /* 清掉命令回显残留 */
-	encoder_reset_stats();
+	rd_reset();
 	printf("压力测试: %lu 次读取...\r\n", (unsigned long)n);
 
 	for(i = 0; i < n; i++)
 	{
-		encoder_read_checked(&raw, 20, 2);
+		rd_checked(&raw, 20, 2);
 		if((i % report) == 0 && i)
 		{
-			uint32_t tot = enc_stat.ok + enc_stat.fail;
+			uint32_t tot = st()->ok + st()->fail;
 			printf("  %3lu%%  ok=%lu fail=%lu rate=%.3f%% abort=%lu recover=%lu\r\n",
-				(unsigned long)(i*100/n), (unsigned long)enc_stat.ok,
-				(unsigned long)enc_stat.fail,
-				tot?(double)enc_stat.fail*100.0/(double)tot:0.0,
-				(unsigned long)enc_stat.abort,(unsigned long)enc_stat.recover);
+				(unsigned long)(i*100/n), (unsigned long)st()->ok,
+				(unsigned long)st()->fail,
+				tot?(double)st()->fail*100.0/(double)tot:0.0,
+				(unsigned long)st()->abort,(unsigned long)st()->recover);
 		}
 		if(rx_sta & 0x8000){ rx_sta = 0; printf("  (被用户中断)\r\n"); break; }
 	}
 	{
-		uint32_t tot = enc_stat.ok + enc_stat.fail;
+		uint32_t tot = st()->ok + st()->fail;
 		printf("完成: 共 %lu 次, ok=%lu fail=%lu\r\n",
-			(unsigned long)tot,(unsigned long)enc_stat.ok,(unsigned long)enc_stat.fail);
+			(unsigned long)tot,(unsigned long)st()->ok,(unsigned long)st()->fail);
 		printf("  错误率 = %.4f%%   abort=%lu  recover=%lu  outlier=%lu\r\n",
-			tot?(double)enc_stat.fail*100.0/(double)tot:0.0,
-			(unsigned long)enc_stat.abort,(unsigned long)enc_stat.recover,
-			(unsigned long)enc_stat.outlier);
-		if(tot && (double)enc_stat.fail*100.0/(double)tot < 0.1)
+			tot?(double)st()->fail*100.0/(double)tot:0.0,
+			(unsigned long)st()->abort,(unsigned long)st()->recover,
+			(unsigned long)st()->outlier);
+		if(tot && (double)st()->fail*100.0/(double)tot < 0.1)
 			printf("  >>> PASS: 错误率 < 0.1%%\r\n");
 		else
 			printf("  >>> FAIL: 错误率过高\r\n");
+	}
+}
+
+/* 测速：在固定时间窗内尽量多读，报告实际读取速率 */
+static void cmd_speed(void)
+{
+	uint32_t t0, t1, n = 0, dt_us;
+	uint16_t raw;
+	printf("测速中（2 秒）... 模式=%s\r\n", g_fast?"FAST(一次2字节读)":"BASE(两次独立读)");
+	rd_reset();
+	t0 = SysTick->VAL;
+	do {
+		rd_checked(&raw, 20, 2);
+		n++;
+		t1 = SysTick->VAL;
+		dt_us = (t0 >= t1) ? (t0 - t1) : (0xFFFFFF - t1 + t0);
+		dt_us /= 9;                       /* 9MHz -> us */
+	} while(dt_us < 2000000UL);
+	{
+		uint32_t tot = st()->ok + st()->fail;
+		printf("  完成 %lu 次校验读 (%lu 次单读) 用时 %lu us\r\n",
+			(unsigned long)n,(unsigned long)tot,(unsigned long)dt_us);
+		printf("  速率 = %lu 次/秒 (校验读)   %lu 次/秒 (单读)\r\n",
+			(unsigned long)((uint64_t)n * 1000000ULL / dt_us),
+			(unsigned long)((uint64_t)tot * 1000000ULL / dt_us));
+		printf("  fail=%lu abort=%lu outlier=%lu\r\n",
+			(unsigned long)st()->fail,(unsigned long)st()->abort,
+			(unsigned long)st()->outlier);
+		if(tot) printf("  错误率 = %.4f%%\r\n",
+			(double)st()->fail*100.0/(double)tot);
 	}
 }
 
@@ -299,25 +363,25 @@ static void cmd_continuous(void)
 {
 	uint32_t sec = 0;
 	uint32_t last_ok, last_fail;
-	encoder_reset_stats();
+	rd_reset();
 	printf("连续模式已启动，再发 C 停止\r\n");
 	last_ok = last_fail = 0;
 	for(;;)
 	{
 		uint16_t raw;
 		uint32_t i;
-		for(i = 0; i < 200; i++) encoder_read_checked(&raw, 20, 3);
+		for(i = 0; i < 200; i++) rd_checked(&raw, 20, 3);
 		dly_ms(200);
 		sec++;
 		{
-			uint32_t d_ok = enc_stat.ok - last_ok;
-			uint32_t d_fail = enc_stat.fail - last_fail;
+			uint32_t d_ok = st()->ok - last_ok;
+			uint32_t d_fail = st()->fail - last_fail;
 			uint32_t tot = d_ok + d_fail;
-			last_ok = enc_stat.ok; last_fail = enc_stat.fail;
+			last_ok = st()->ok; last_fail = st()->fail;
 			printf("[%4lu s] ok=%lu fail=%lu rate=%.3f%% abort=%lu recover=%lu\r\n",
 				(unsigned long)sec,(unsigned long)d_ok,(unsigned long)d_fail,
 				tot? (double)d_fail*100.0/(double)tot : 0.0,
-				(unsigned long)enc_stat.abort,(unsigned long)enc_stat.recover);
+				(unsigned long)st()->abort,(unsigned long)st()->recover);
 		}
 		{
 			uint32_t w;
@@ -348,16 +412,17 @@ int main(void)
 	printf("SysClk=%lu Hz\r\n", (unsigned long)clk_hz);
 	printf("电机驱动 EN 保持失能，本固件不输出任何 PWM\r\n\r\n");
 
-	encoder_reset_stats();
-	encoder_i2c_init(100000);          /* ★ 默认 100kHz */
+	rd_reset();
+	rd_init(100000);          /* ★ 默认 100kHz */
 	dly_ms(10);
 
-	printf("I2C1 已初始化 @ %lu Hz\r\n", (unsigned long)enc_stat.speed_hz);
+	printf("I2C1 已初始化 @ %lu Hz\r\n", (unsigned long)st()->speed_hz);
 	cmd_lines();
 	printf("\r\n");
 	cmd_status();
 	printf("\r\n命令: ? A L R S Z J<n> K<Hz> D<hex> M C\r\n");
-	printf("建议顺序: M(磁铁) -> J1000(抖动) -> T5000(压力) -> C(长跑)\r\n\r\n");
+	printf("命令: 0=BASE模式 1=FAST模式 P=测速 J<n>=抖动 T<n>=压力 C=长跑\r\n");
+	printf("建议: M -> 0 P -> 1 P -> T20000 (两种模式各压测一次对比)\r\n\r\n");
 
 	for(;;)
 	{
@@ -366,18 +431,18 @@ int main(void)
 			switch(rx_buf[0])
 			{
 				case '?': cmd_status(); break;
-				case 'A': { uint16_t r=0; int e=encoder_read_checked(&r,20,3);
+				case 'A': { uint16_t r=0; int e=rd_checked(&r,20,3);
 					printf("raw=%u angle=%.4f %s\r\n",(unsigned)r,
 						encoder_raw_to_rad(r), e?"FAIL":"OK"); } break;
 				case 'L': cmd_lines(); break;
 				case 'R': encoder_bus_recover(); printf("已执行总线恢复\r\n"); break;
 				case 'S':
 					printf("ok=%lu fail=%lu checked=%lu outlier=%lu abort=%lu recover=%lu\r\n",
-						(unsigned long)enc_stat.ok,(unsigned long)enc_stat.fail,
-						(unsigned long)enc_stat.checked_ok,(unsigned long)enc_stat.outlier,
-						(unsigned long)enc_stat.abort,(unsigned long)enc_stat.recover);
+						(unsigned long)st()->ok,(unsigned long)st()->fail,
+						(unsigned long)st()->checked_ok,(unsigned long)st()->outlier,
+						(unsigned long)st()->abort,(unsigned long)st()->recover);
 					break;
-				case 'Z': encoder_reset_stats(); printf("统计已清零\r\n"); break;
+				case 'Z': rd_reset(); printf("统计已清零\r\n"); break;
 				case 'J': {
 					uint16_t n = (uint16_t)atoi((const char *)(rx_buf+1));
 					if(n == 0) n = 1000;
@@ -385,8 +450,8 @@ int main(void)
 				case 'K': {
 					uint32_t s = (uint32_t)atoi((const char *)(rx_buf+1));
 					if(s == 0) s = 100000;
-					encoder_i2c_init(s);
-					printf("I2C speed = %lu Hz\r\n",(unsigned long)enc_stat.speed_hz); } break;
+					rd_init(s);
+					printf("I2C speed = %lu Hz\r\n",(unsigned long)st()->speed_hz); } break;
 				case 'D': {
 					uint32_t a = (uint32_t)strtol((const char *)(rx_buf+1),0,16);
 					dbg_ok = (uint8_t)(read_reg_generic((uint8_t)a,&dbg_val)==0);
@@ -398,6 +463,11 @@ int main(void)
 					uint32_t n = (uint32_t)atoi((const char *)(rx_buf+1));
 					if(n == 0) n = 5000;
 					cmd_stress(n); } break;
+				case '0': g_fast = 0; rd_init(rd_speed());
+					printf("模式 = BASE (encoder.c 两次独立读, 阶段1已验证)\r\n"); break;
+				case '1': g_fast = 1; rd_init(rd_speed());
+					printf("模式 = FAST (encoder_fast.c 一次2字节读)\r\n"); break;
+				case 'P': cmd_speed(); break;
 				case 'C': cmd_continuous(); break;
 				default: break;
 			}
@@ -410,6 +480,8 @@ int main(void)
 		}
 	}
 }
+
+
 
 
 

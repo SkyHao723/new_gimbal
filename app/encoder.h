@@ -1,4 +1,4 @@
-/* ============================================================================
+﻿/* ============================================================================
  * encoder.h —— AS5600 角度读取（健壮版）
  * ==========================================================================*/
 #ifndef ENCODER_H
@@ -44,4 +44,12 @@ void    encoder_bus_recover(void);
 uint8_t encoder_check_lines(void);
 int     encoder_jitter_test(uint16_t n, uint16_t *min_p, uint16_t *max_p, uint16_t *fail_p);
 
+
+/* ===== 加速版（encoder_fast.c）—— 一次 2 字节读，需独立压测验证 ===== */
+extern EncoderStats_t encf_stat;
+void   encoder_fast_init(uint32_t speed_hz);
+int    encoder_fast_read_raw(uint16_t *out);
+int    encoder_fast_read_checked(uint16_t *raw, uint16_t max_delta, uint8_t retry);
+void   encoder_fast_reset_stats(void);
 #endif
+

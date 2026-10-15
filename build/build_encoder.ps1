@@ -53,7 +53,8 @@ $sources = @(
   "$BLD\syscalls.c",
   "$BLD\clock.c",
   "$SRC\encoder_test.c",           # main
-  "$SRC\encoder.c",                # robust AS5600 driver
+  "$SRC\encoder.c",                # robust AS5600 driver (validated)
+  "$SRC\encoder_fast.c",           # 2-byte single-transaction variant (A/B test)
   "$LIB\startup\system_stm32f10x.c",
   "$LIB\lib\src\misc.c",
   "$LIB\lib\src\stm32f10x_rcc.c",
@@ -95,4 +96,5 @@ Get-ChildItem $OUT -File | Where-Object { $_.Extension -eq '.hex' } |
 Write-Host ""
 Write-Host "Flash (ST-Link):"
 Write-Host "  STM32_Programmer_CLI -c port=SWD -w build\out_encoder\encoder.hex -v -g 0x08000000"
+
 
