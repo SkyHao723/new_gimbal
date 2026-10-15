@@ -1,0 +1,6 @@
+# PlatformIO 构建产物
+.pio/
+.vscode/
+
+# 本工程不需要纳入版本控制的大型依赖
+.pio/libdeps/
