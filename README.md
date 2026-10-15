@@ -1,4 +1,4 @@
-# New Gimbal — 云台电机测试工程
+﻿# New Gimbal — 云台电机测试工程
 
 基于 **STM32F103C8T6 + SimpleFOC Mini (DRV8316C) + AS5600** 的云台电机测试工程。
 目标是先把**测试版**（开发板 + 厂家驱动小板）的流程打通，为后续 G431 自制板的正式版打基础。
@@ -29,6 +29,14 @@ New_gimbal/
 │       ├── SimpleFOC/       BLDCMotor / FOCMotor / MagneticSensor / pid ...
 │       ├── user/main.c      ★ 正式版主程序（已做安全重构）
 │       └── Hardware/        timer.c (TIM1 PWM) / iic.c / usart.c / delay.c
+├── foc_official/            ★ 方案A：PlatformIO + 官方 SimpleFOC 库（已跑通）
+│   ├── platformio.ini
+│   ├── patch_simplefoc.py   编译前自动修补 core 兼容问题
+│   ├── include/MyUart.h     寄存器直驱串口
+│   └── src/main.cpp         主程序
+├── tools/web_controller/    ★ 浏览器控制器（Web Serial，单文件）
+│   ├── index.html
+│   └── README.md
 └── docs/
     ├── 接线检查表.md
     └── 调试总结与安全指南.md    ★ 4 个关键 bug 的根因与修复 + 安全规程
@@ -165,3 +173,4 @@ R       开始旋转
 - 原移植教程（loop222）：https://blog.csdn.net/loop222/article/details/120471390
 - DRV8316C 数据手册：TI SLVSH07
 - STM32F103 数据手册：ST DS5319
+
