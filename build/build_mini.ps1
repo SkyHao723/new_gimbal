@@ -58,7 +58,7 @@ $CFLAGS = @(
 $sources = @(
   "$BLD\startup_gcc.s",
   "$BLD\syscalls.c",
-  "$BLD\diag_common.c",              # RCC clock setup + TIM4 tick
+  "$BLD\clock.c",                # RCC clock setup
   "$SRC\mini_test.c",                # main program
   "$LIB\startup\system_stm32f10x.c",
   "$LIB\lib\src\misc.c",
@@ -104,4 +104,5 @@ Get-ChildItem $OUT -File | Where-Object { $_.Extension -in '.hex','.bin' } |
 Write-Host ""
 Write-Host "Flash (ST-Link):"
 Write-Host "  STM32_Programmer_CLI -c port=SWD -w build\out\mini.hex -v -g 0x08000000"
+
 
