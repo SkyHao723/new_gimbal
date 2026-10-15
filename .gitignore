@@ -1,0 +1,28 @@
+# 构建产物
+build/out/
+*.o
+*.elf
+*.bin
+*.hex
+*.map
+*.crf
+*.d
+*.axf
+*.lnp
+*.dep
+
+# Keil / MDK
+Objects/
+Listings/
+DebugConfig/
+RTE/
+*.uvguix.*
+*.build_log.htm
+*.htm
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
