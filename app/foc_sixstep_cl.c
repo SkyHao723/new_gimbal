@@ -217,6 +217,12 @@ static void cmd_calibrate(void)
 	printf("步骤1: 固定换相状态锁转子 (V=%.2fV)\r\n", v_limit);
 	if(read_angle()){ printf("!! 编码器失败\r\n"); return; }
 
+	/* ★ 官方做法：把转子锁在电角度 270°，而不是 0°
+	 * 原因：闭环第一次换相时  T ∝ sin(θ_field - θ_rotor)
+	 *   锁在 0°   -> T ∝ sin(0)   = 0  死点！给多大电压都不动
+	 *   锁在 270° -> T ∝ sin(270°) = -1 满力矩，立刻起转 */
+	lock_st = 4;                       /* 六步的第 4 个状态对应 270° 附近 */
+
 	GPIO_SetBits(GPIOB,GPIO_Pin_0);
 	for(i=0;i<80;i++){                 /* 80*20ms = 1.6s */
 		six_step(lock_st, v_limit);
@@ -327,6 +333,59 @@ static void cmd_scan(void)
 	printf("扫描完成\r\n");
 }
 
+/* ★ 关键测试：给固定电角度偏离，看转子是否产生力矩并移动
+ * 这是验证"死点"理论的直接实验：
+ *   off=0    -> sin(0)=0    应该不动
+ *   off=90°  -> sin(90°)=1  应该动
+ *   off=180° -> sin(180°)=0 应该不动
+ *   off=270° -> sin(270°)=-1 应该反向动
+ */
+static void cmd_torque_test(void)
+{
+	int k;
+	float offs[4] = {0.0f, 1.57079633f, 3.14159265f, 4.71238898f};
+	const char *names[4] = {"0deg", "90deg", "180deg", "270deg"};
+	float settle;
+
+	printf("\r\n===== 力矩/死点验证测试 =====\r\n");
+	printf("V=%.2fV  每个角度保持 2 秒，观察转子是否移动\r\n", v_limit);
+	if(!calibrated){ printf("!! 请先发 C 标定\r\n"); return; }
+
+	GPIO_SetBits(GPIOB,GPIO_Pin_0);
+
+	for(k=0;k<4;k++)
+	{
+		int i;
+		float m0, m1;
+		if(read_angle()){ printf("编码器失败\r\n"); break; }
+		m0 = enc_mech;
+
+		printf("\r\n-- off=%s --\r\n", names[k]);
+		for(i=0;i<100;i++)        /* 100*20ms = 2s */
+		{
+			float e = elec_from_encoder() + offs[k];
+			while(e >= 6.28318531f) e -= 6.28318531f;
+			{
+				int st = (int)(e / 1.04719755f);
+				if(st>5) st=5; if(st<0) st=0;
+				six_step(st, v_limit);
+			}
+			dly_ms(20);
+			if(cur_max() > i_limit){
+				GPIO_ResetBits(GPIOB,GPIO_Pin_0); pwm_off();
+				printf("  !! 过流 %.3fA\r\n",cur_max()); return;
+			}
+			if(read_angle()==0) m1 = enc_mech;
+		}
+		read_angle();
+		printf("  mech: %.4f -> %.4f   移动 %.4f rad    I=%.3fA\r\n",
+			m0, enc_mech, enc_mech - m0, cur_max());
+	}
+
+	pwm_off(); GPIO_ResetBits(GPIOB,GPIO_Pin_0);
+	printf("\r\n结论: off=90/270 应该移动明显, off=0/180 应该几乎不动\r\n");
+}
+
 static void cmd_selftest(void)
 {
 	printf("\r\n===== 自检 =====\r\n");
@@ -410,6 +469,7 @@ int main(void)
 			{
 				case '?': cmd_status(); break;
 				case 'X': cmd_selftest(); break;
+				case 'T': cmd_torque_test(); break;
 				case 'K': cmd_scan(); break;
 				case 'C': cmd_calibrate(); break;
 				case 'R': cmd_closedloop(); break;
@@ -434,5 +494,7 @@ int main(void)
 		}
 	}
 }
+
+
 
 
