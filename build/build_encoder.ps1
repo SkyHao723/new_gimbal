@@ -98,3 +98,4 @@ Write-Host "Flash (ST-Link):"
 Write-Host "  STM32_Programmer_CLI -c port=SWD -w build\out_encoder\encoder.hex -v -g 0x08000000"
 
 
+

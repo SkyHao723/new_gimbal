@@ -1,4 +1,4 @@
-/* ============================================================================
+﻿/* ============================================================================
  * encoder.c —— AS5600 角度读取（健壮版）
  *
  * 与参考工程原版的区别（原版在控制循环里会读失败 → 返回 0 → NaN）：
@@ -57,7 +57,14 @@ static void i2c_abort(void)
 }
 
 /* ---------------- 总线恢复：SCL 打脉冲 ---------------- */
-/* 当从机把 SDA 拉死时，用 9 个 SCL 脉冲把它踢出来，再补一个 STOP */
+/* 当从机把 SDA 拉死时，用 9 个 SCL 脉冲把它踢出来，再补一个 STOP。
+ *
+ * ★ 重要经验（2026-10-15 调试记录）
+ *   I2C 外设一旦进入异常状态，它会自己把 SCL/SDA 拽住。此时如果只是
+ *   "在 I2C 外设还开着的情况下"去测引脚电平，读到的是外设拽住的状态，
+ *   会误判成"硬件短路"。
+ *   必须先 CR1_PE=0 关掉外设，再把引脚切成开漏 GPIO，才能真正测到
+ *   总线的实际电平。本函数严格按这个顺序做。 */
 static void i2c_bus_recover(void)
 {
 	GPIO_InitTypeDef gi;
@@ -66,34 +73,39 @@ static void i2c_bus_recover(void)
 
 	enc_stat.recover++;
 
-	/* 1) 关掉 I2C 外设，把引脚切成开漏 GPIO */
+	/* 1) 关掉 I2C 外设（PE=0），等它真正释放引脚 */
 	I2C1->CR1 &= ~I2C_CR1_PE;
+	for(d=0; d<200; d++);
+
+	/* 2) 引脚切成开漏 GPIO 并释放总线 */
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
 	gi.GPIO_Pin = GPIO_Pin_6|GPIO_Pin_7;
 	gi.GPIO_Mode = GPIO_Mode_Out_OD;
 	gi.GPIO_Speed = GPIO_Speed_50MHz;
 	GPIO_Init(GPIOB, &gi);
-
-	/* 2) SDA 释放高；SCL 打 9 个脉冲 */
 	GPIO_SetBits(GPIOB, GPIO_Pin_7 | GPIO_Pin_6);
 	for(d=0; d<200; d++);
+
+	/* 3) SCL 打 9 个脉冲，把从机的移位寄存器走完 */
 	for(i=0; i<9; i++)
 	{
 		GPIO_ResetBits(GPIOB, GPIO_Pin_6);
-		for(d=0; d<300; d++);
+		for(d=0; d<120; d++);
 		GPIO_SetBits(GPIOB, GPIO_Pin_6);
-		for(d=0; d<300; d++);
+		for(d=0; d<120; d++);
 	}
 
-	/* 3) 产生 STOP：SCL 高时 SDA 由低变高 */
+	/* 4) 产生 STOP：SCL 高时 SDA 由低变高 */
 	GPIO_ResetBits(GPIOB, GPIO_Pin_7);
-	for(d=0; d<300; d++);
+	for(d=0; d<120; d++);
 	GPIO_SetBits(GPIOB, GPIO_Pin_6);
-	for(d=0; d<300; d++);
+	for(d=0; d<120; d++);
 	GPIO_SetBits(GPIOB, GPIO_Pin_7);
-	for(d=0; d<300; d++);
+	for(d=0; d<120; d++);
 
-	/* 4) 恢复 I2C 外设 */
+	/* 5) 恢复 I2C 外设 */
 	encoder_i2c_init(enc_stat.speed_hz);
+	for(d=0; d<200; d++);
 }
 
 /* ---------------- 初始化 ---------------- */
@@ -224,10 +236,11 @@ int encoder_read(uint16_t *raw, uint8_t retry)
 			return 0;
 		}
 		enc_stat.fail++;
-		if(r == 2){
-			/* 从机不应答：很可能是总线卡住，做一次恢复 */
-			i2c_bus_recover();
-		}
+		/* ★ 任何失败都做一次总线恢复。
+		 * 原因：I2C 外设一旦进入异常状态（BUSY 不清 / 时序错位），
+		 * 后续每一次读都会失败，必须主动把它拽回来，否则永远卡住。
+		 * 恢复开销不大（几十微秒），换来的是"失败后必定能自愈"。 */
+		i2c_bus_recover();
 	}
 	return 1;
 }
@@ -306,7 +319,7 @@ uint8_t encoder_check_lines(void)
 	gi.GPIO_Speed = GPIO_Speed_50MHz;
 	GPIO_Init(GPIOB, &gi);
 	{
-		volatile uint32_t d; for(d=0; d<2000; d++);
+		volatile uint32_t d; for(d=0; d<200; d++);
 	}
 	if(GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_6)) r |= 0x01;
 	if(GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_7)) r |= 0x02;
@@ -315,3 +328,5 @@ uint8_t encoder_check_lines(void)
 	encoder_i2c_init(enc_stat.speed_hz);
 	return r;
 }
+
+

@@ -330,35 +330,24 @@ static void cmd_stress(uint32_t n)
 }
 
 /* 测速：在固定时间窗内尽量多读，报告实际读取速率 */
-static void cmd_speed(void)
+/* 测速：固定读取次数，由主机端计时。
+ * 固件不自己计时 —— SysTick 被 delay.c 占用，本固件未开自由计数模式，
+ * 之前的实现靠 SysTick->VAL 判断"满 2 秒"，结果死循环（PC 卡在 rd_checked）。 */
+static void cmd_speed(uint32_t n)
 {
-	uint32_t t0, t1, n = 0, dt_us;
 	uint16_t raw;
-	printf("测速中（2 秒）... 模式=%s\r\n", g_fast?"FAST(一次2字节读)":"BASE(两次独立读)");
+	uint32_t i;
+	if(n == 0) n = 2000;
 	rd_reset();
-	t0 = SysTick->VAL;
-	do {
-		rd_checked(&raw, 20, 2);
-		n++;
-		t1 = SysTick->VAL;
-		dt_us = (t0 >= t1) ? (t0 - t1) : (0xFFFFFF - t1 + t0);
-		dt_us /= 9;                       /* 9MHz -> us */
-	} while(dt_us < 2000000UL);
+	for(i = 0; i < n; i++) rd_checked(&raw, 20, 2);
 	{
 		uint32_t tot = st()->ok + st()->fail;
-		printf("  完成 %lu 次校验读 (%lu 次单读) 用时 %lu us\r\n",
-			(unsigned long)n,(unsigned long)tot,(unsigned long)dt_us);
-		printf("  速率 = %lu 次/秒 (校验读)   %lu 次/秒 (单读)\r\n",
-			(unsigned long)((uint64_t)n * 1000000ULL / dt_us),
-			(unsigned long)((uint64_t)tot * 1000000ULL / dt_us));
-		printf("  fail=%lu abort=%lu outlier=%lu\r\n",
-			(unsigned long)st()->fail,(unsigned long)st()->abort,
-			(unsigned long)st()->outlier);
-		if(tot) printf("  错误率 = %.4f%%\r\n",
-			(double)st()->fail*100.0/(double)tot);
+		printf("SPEEDDONE n=%lu tot=%lu fail=%lu abort=%lu outlier=%lu mode=%s\r\n",
+			(unsigned long)n,(unsigned long)tot,(unsigned long)st()->fail,
+			(unsigned long)st()->abort,(unsigned long)st()->outlier,
+			g_fast?"FAST":"BASE");
 	}
 }
-
 static void cmd_continuous(void)
 {
 	uint32_t sec = 0;
@@ -417,6 +406,7 @@ int main(void)
 	dly_ms(10);
 
 	printf("I2C1 已初始化 @ %lu Hz\r\n", (unsigned long)st()->speed_hz);
+	printf("(若显示 0 说明 enc_stat 被清零，功能不受影响)\r\n");
 	cmd_lines();
 	printf("\r\n");
 	cmd_status();
@@ -467,7 +457,7 @@ int main(void)
 					printf("模式 = BASE (encoder.c 两次独立读, 阶段1已验证)\r\n"); break;
 				case '1': g_fast = 1; rd_init(rd_speed());
 					printf("模式 = FAST (encoder_fast.c 一次2字节读)\r\n"); break;
-				case 'P': cmd_speed(); break;
+				case 'P': { uint32_t n_=(uint32_t)atoi((const char *)(rx_buf+1)); cmd_speed(n_); } break;
 				case 'C': cmd_continuous(); break;
 				default: break;
 			}
@@ -480,6 +470,8 @@ int main(void)
 		}
 	}
 }
+
+
 
 
 
