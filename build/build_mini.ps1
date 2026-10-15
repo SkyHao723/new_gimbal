@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # Build MINI_TEST firmware for STM32F103C8T6 + SimpleFOC Mini (DRV8316C)
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File build\build_mini.ps1
@@ -52,7 +52,7 @@ New-Item -ItemType Directory -Force -Path $OUT | Out-Null
 $CFLAGS = @(
   '-mcpu=cortex-m3','-mthumb','-Os','-g0','-ffunction-sections','-fdata-sections',
   '-DUSE_STDPERIPH_DRIVER','-DSTM32F10X_MD','-w',
-  "-I$LIB\lib\inc","-I$LIB\startup","-I$SRC\Hardware","-I$SRC\user","-I$BLD"
+  "-I$LIB\lib\inc","-I$LIB\startup","-I$SRC","-I$SRC\Hardware","-I$BLD"
 )
 
 $sources = @(
@@ -104,3 +104,4 @@ Get-ChildItem $OUT -File | Where-Object { $_.Extension -in '.hex','.bin' } |
 Write-Host ""
 Write-Host "Flash (ST-Link):"
 Write-Host "  STM32_Programmer_CLI -c port=SWD -w build\out\mini.hex -v -g 0x08000000"
+
