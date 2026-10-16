@@ -9,6 +9,7 @@ New-Item -ItemType Directory -Path (Split-Path -Parent $testExe) -Force | Out-Nu
     -I (Join-Path $projectRoot 'Control') `
     (Join-Path $projectRoot 'Control\foc_math.c') `
     (Join-Path $projectRoot 'Control\encoder_tracking.c') `
+    (Join-Path $projectRoot 'Control\trajectory.c') `
     (Join-Path $projectRoot 'Control\motor.c') `
     (Join-Path $PSScriptRoot 'test_control.c') -lm -o $testExe
 if ($LASTEXITCODE -ne 0) { throw 'Host test build failed.' }

@@ -9,12 +9,15 @@
 #define MOTOR_VOLTAGE_LIMIT       3.0f
 #define MOTOR_MAX_VOLTAGE         5.0f
 #define MOTOR_VELOCITY_LIMIT      20.0f
-#define MOTOR_VELOCITY_P          0.2f
-#define MOTOR_VELOCITY_I          5.0f
+/* Retuned for the measured ring/stick-slip near pi: stronger proportional
+   damping/stiffness, slower integral, less velocity-feedback delay. */
+#define MOTOR_VELOCITY_P          0.6f
+#define MOTOR_VELOCITY_I          2.0f
 #define MOTOR_VOLTAGE_RAMP        1000.0f
-#define MOTOR_VELOCITY_FILTER_TF  0.05f
-#define MOTOR_ANGLE_P             20.0f
+#define MOTOR_VELOCITY_FILTER_TF  0.02f
+#define MOTOR_ANGLE_P             30.0f
 #define MOTOR_TARGET_SLEW         4.0f
+#define MOTOR_TARGET_ACCEL        4.0f  /* rad/s^2; 0 -> 4 rad/s in 1s */
 
 /* Set to 0 to boot disabled without moving. No alignment sweep is performed. */
 #define STARTUP_ROTATE_ONCE       1

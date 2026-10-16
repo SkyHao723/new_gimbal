@@ -474,6 +474,11 @@
               <FileType>1</FileType>
               <FilePath>.\Control\encoder_tracking.c</FilePath>
             </File>
+            <File>
+              <FileName>trajectory.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Control\trajectory.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

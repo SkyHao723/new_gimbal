@@ -2,10 +2,12 @@
 #define MOTOR_H
 #include "as5600.h"
 #include "foc_math.h"
+#include "trajectory.h"
 
 typedef struct {
     Encoder sensor;
     VelocityPI pi;
+    Trajectory path;
     float angle, velocity, target, ramp_target;
     float voltage_limit, velocity_limit;
     float openloop_angle, startup_target;

@@ -34,6 +34,7 @@ static int enable_here(Motor *motor)
 {
     if (!update_sensor(motor)) return 0;
     motor->target = motor->ramp_target = motor->angle;
+    trajectory_reset(&motor->path, motor->angle);
     memset(&motor->pi, 0, sizeof(motor->pi));
     motor->step_us = board_micros();
     apply_voltage(0.0f, 0.0f);
@@ -47,6 +48,7 @@ void motor_disable(Motor *motor)
     motor->enabled = motor->startup = 0u;
     memset(&motor->pi, 0, sizeof(motor->pi));
     motor->target = motor->ramp_target = motor->angle;
+    trajectory_reset(&motor->path, motor->angle);
 }
 
 void motor_init(Motor *motor)
@@ -61,6 +63,7 @@ void motor_init(Motor *motor)
         return;
     }
     motor->target = motor->ramp_target = motor->angle;
+    trajectory_reset(&motor->path, motor->angle);
     printf("fixed calibration: pp=%d dir=%d zero=%.4f (no sweep)\r\n",
            MOTOR_POLE_PAIRS, MOTOR_SENSOR_DIRECTION, (double)MOTOR_ZERO_ELECTRIC);
 #if STARTUP_ROTATE_ONCE
@@ -82,7 +85,7 @@ void motor_step(Motor *motor)
 {
     uint32_t now = board_micros();
     float dt = (uint32_t)(now-motor->step_us)*1e-6f;
-    float error, max_step, velocity_sp, q, electrical;
+    float velocity_sp, q, electrical;
     motor->step_us = now;
     if (dt <= 0.0f || dt > 0.05f) dt = 0.001f;
     if (!update_sensor(motor) || !motor->enabled) return;
@@ -101,10 +104,11 @@ void motor_step(Motor *motor)
         apply_voltage(motor->voltage_limit, motor->openloop_angle*MOTOR_POLE_PAIRS);
         return;
     }
-    max_step = fminf(MOTOR_TARGET_SLEW, motor->velocity_limit)*dt;
-    error = motor->target-motor->ramp_target;
-    motor->ramp_target += foc_clamp(error, -max_step, max_step);
-    velocity_sp = foc_clamp(MOTOR_ANGLE_P*(motor->ramp_target-motor->angle),
+    trajectory_step(&motor->path, dt);
+    motor->ramp_target = motor->path.position;
+    /* Reference velocity feedforward avoids building a large following error
+       just to make the motor follow a moving target. At rest it is zero. */
+    velocity_sp = foc_clamp(motor->path.velocity + MOTOR_ANGLE_P*(motor->ramp_target-motor->angle),
                             -motor->velocity_limit, motor->velocity_limit);
     q = foc_velocity_pi(&motor->pi, velocity_sp-motor->velocity, dt, motor->voltage_limit);
     electrical = MOTOR_SENSOR_DIRECTION*MOTOR_POLE_PAIRS*motor->sensor.mechanical-MOTOR_ZERO_ELECTRIC;
@@ -114,10 +118,12 @@ void motor_step(Motor *motor)
 void motor_status(const Motor *motor)
 {
     /* Keep the existing Web Serial parser's field names and EN format. */
-    printf("EN=%s  angle=%.4f  vel=%.4f  tgt=%.4f  Vlim=%.2f  Vbus=%.1f  dir=%d  pp=FIXED  zero=%.4f\r\n",
+    printf("EN=%s  angle=%.4f  vel=%.4f  tgt=%.4f  Vlim=%.2f  Vbus=%.1f  dir=%d  pp=FIXED  zero=%.4f  ref=%.4f  rv=%.4f  uq=%.3f  ui=%.3f\r\n",
            motor->enabled ? "ON" : "OFF", (double)motor->angle, (double)motor->velocity,
            (double)motor->target, (double)motor->voltage_limit, (double)MOTOR_SUPPLY_VOLTAGE,
-           MOTOR_SENSOR_DIRECTION, (double)MOTOR_ZERO_ELECTRIC);
+           MOTOR_SENSOR_DIRECTION, (double)MOTOR_ZERO_ELECTRIC, (double)motor->ramp_target,
+           (double)motor->path.velocity, (double)(motor->startup ? motor->voltage_limit : motor->pi.output_prev),
+           (double)motor->pi.integral);
 }
 
 static int read_number(const char *text, float *value)
@@ -155,10 +161,13 @@ void motor_command(Motor *motor, const char *command)
         if (motor->startup) {
             motor->startup = 0u;
             motor->ramp_target = motor->angle;
+            trajectory_reset(&motor->path, motor->angle);
+            motor->path.velocity = motor->velocity;
             memset(&motor->pi, 0, sizeof(motor->pi));
             printf("startup rotate ABORTED by target command\r\n");
         }
         motor->target = value;
+        trajectory_plan(&motor->path, value, fminf(MOTOR_TARGET_SLEW, motor->velocity_limit), MOTOR_TARGET_ACCEL);
         printf("target=%.4f\r\n", (double)value);
         break;
     case 'V':
@@ -174,6 +183,8 @@ void motor_command(Motor *motor, const char *command)
             break;
         }
         motor->velocity_limit = value;
+        if (!motor->startup)
+            trajectory_plan(&motor->path, motor->target, fminf(MOTOR_TARGET_SLEW, value), MOTOR_TARGET_ACCEL);
         printf("Vellim=%.2f\r\n", (double)value);
         break;
     case 'R':
