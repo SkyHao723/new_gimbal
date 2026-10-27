@@ -152,7 +152,10 @@ int main(void)
             motor_disable(&motor);
             current_sense_arm(0);
             board_discard_commands();
-            if (stop & BOARD_STOP_DRIVER) printf("FAULT nFAULT low, motor DISABLED\r\n");
+            /* nSLEEP low means we put the driver to sleep ourselves, so its
+               low nFAULT is an artifact of that, not a real fault report. */
+            if ((stop & BOARD_STOP_DRIVER) && (GPIOB->IDR & DRIVER_SLEEP_PIN))
+                printf("FAULT nFAULT low, motor DISABLED\r\n");
             if (stop & BOARD_STOP_CAN) printf("FAULT CAN, motor DISABLED\r\n");
             if (stop & BOARD_STOP_CURRENT)
                 printf("FAULT overcurrent pk=%.2fA, motor DISABLED\r\n", (double)limit.peak_a);

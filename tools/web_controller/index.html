@@ -273,9 +273,12 @@
 'use strict';
 
 const $ = id => document.getElementById(id);
-const SUPPORTED = 'serial' in navigator;
+/* g431_can_bridge.py 提供页面时会注入 window.__G431_BRIDGE__：
+   有它就通过 WebSocket -> CAN 驱动 G431，没有则保持原来的 Web Serial 方式。 */
+const BRIDGE = window.__G431_BRIDGE__ || null;
+const SUPPORTED = BRIDGE ? true : ('serial' in navigator);
 
-let port = null, reader = null, writer = null;
+let port = null, reader = null, writer = null, ws = null;
 let connected = false, pollTimer = null;
 let rxBuffer = '';
 let currentAngle = 0;
@@ -284,7 +287,8 @@ let txTail = Promise.resolve();
 let pollInFlight = false;
 let connectionEpoch = 0;
 const DEFAULT_VLIM = 3.0;
-const MAX_VLIM = 5.0;
+/* G431 板（DRV8316C）硬上限 8 V；F103 板固件内部还会再夹到自己的 5 V */
+const MAX_VLIM = 8.0;
 
 /* ---------------- 日志 ---------------- */
 function log(text, cls) {
@@ -301,6 +305,7 @@ function logTx(s){ log('>> ' + s, 'tx'); }
 
 /* ---------------- 连接 ---------------- */
 async function connect() {
+  if (BRIDGE) return connectBridge();
   try {
     port = await navigator.serial.requestPort();
     const baud = parseInt($('baud').value || '115200', 10);
@@ -340,6 +345,7 @@ async function disconnect() {
   ++connectionEpoch;
   txTail = Promise.resolve();
   connected = false;
+  try { if (ws) { ws.close(); ws = null; } } catch(e){}
   try { if (reader) { await reader.cancel(); reader = null; } } catch(e){}
   try { if (writer) { writer.releaseLock(); writer = null; } } catch(e){}
   try { if (port) { await port.close(); port = null; } } catch(e){}
@@ -371,6 +377,57 @@ function setConn(on) {
   document.querySelectorAll('[data-tgt],[data-step],[data-vlim],[data-vel]').forEach(b => b.disabled = dis);
 }
 
+/* ---------------- WebSocket -> CAN 桥 ---------------- */
+/* 把收到的一小段文本按 \n 切行，串口和桥都走这里 */
+function handleIncoming(text) {
+  rxBuffer += text;
+  let idx;
+  while ((idx = rxBuffer.indexOf('\n')) >= 0) {
+    const line = rxBuffer.slice(0, idx).replace(/\r$/, '');
+    rxBuffer = rxBuffer.slice(idx + 1);
+    if (line.trim()) { log(line); parseLine(line); }
+  }
+}
+
+async function connectBridge() {
+  try {
+    log('正在连接 CAN 桥 ' + BRIDGE.ws + ' …', 'sys');
+    await new Promise((resolve, reject) => {
+      const sock = new WebSocket(BRIDGE.ws);
+      ws = sock;
+      sock.onopen = () => resolve();
+      sock.onerror = () => reject(new Error('连不上 ' + BRIDGE.ws + '，先运行 tools/g431_can_bridge.py'));
+      sock.onmessage = ev => { if (connected) handleIncoming(String(ev.data)); };
+      sock.onclose = () => {
+        ws = null;
+        if (connected) {
+          connected = false;
+          stopPoll();
+          resetStatusUI();
+          setConn(false);
+          log('CAN 桥已断开', 'err');
+        }
+      };
+    });
+    const epoch = ++connectionEpoch;
+    connected = true;
+    rxBuffer = '';
+    haveAngle = false;
+    setConn(true);
+    log('已连接 CAN 桥（WebSocket）', 'sys');
+    setTimeout(async () => {
+      if (epoch === connectionEpoch && connected) await send('?');
+    }, 200);
+    if ($('poll').checked) startPoll();
+  } catch (e) {
+    ws = null;
+    connected = false;
+    resetStatusUI();
+    setConn(false);
+    log('连接失败：' + (e && e.message ? e.message : e), 'err');
+  }
+}
+
 /* ---------------- 读循环 ---------------- */
 async function readLoop() {
   const decoder = new TextDecoder();
@@ -380,13 +437,7 @@ async function readLoop() {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        rxBuffer += decoder.decode(value, { stream: true });
-        let idx;
-        while ((idx = rxBuffer.indexOf('\n')) >= 0) {
-          const line = rxBuffer.slice(0, idx).replace(/\r$/, '');
-          rxBuffer = rxBuffer.slice(idx + 1);
-          if (line.trim()) { log(line); parseLine(line); }
-        }
+        handleIncoming(decoder.decode(value, { stream: true }));
       }
     } catch (e) {
       if (connected) log('读取中断：' + e.message, 'err');
@@ -461,10 +512,21 @@ function setEnableUI(on) {
 
 /* ---------------- 发送 ---------------- */
 async function send(cmd) {
-  if (!connected || !writer) { log('未连接，无法发送', 'err'); return false; }
+  if (!connected || (!writer && !ws)) { log('未连接，无法发送', 'err'); return false; }
   const epoch = connectionEpoch;
   const job = txTail.then(async () => {
-    if (epoch !== connectionEpoch || !connected || !writer) return false;
+    if (epoch !== connectionEpoch || !connected) return false;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(cmd);
+        logTx(cmd);
+        return true;
+      } catch (e) {
+        log('发送失败：' + e.message, 'err');
+        return false;
+      }
+    }
+    if (!writer) return false;
     try {
       const data = new TextEncoder().encode(cmd + '\r\n');
       await writer.write(data);
@@ -505,11 +567,19 @@ if (!SUPPORTED) {
   $('unsupported').style.display = 'block';
   $('btnConnect').disabled = true;
 }
-if (SUPPORTED) navigator.serial.addEventListener('disconnect', event => {
-  if (port && event.target === port) {
-    disconnect().catch(e => log('设备断开处理失败：' + e.message, 'err'));
-  }
-});
+if (BRIDGE) {
+  /* 桥接模式：串口波特率无意义，改显示桥地址 */
+  if ($('baud')) { $('baud').disabled = true; $('baud').value = 'CAN 500k'; }
+  log('检测到 CAN 桥：' + BRIDGE.ws + '（点「连接」即可）', 'sys');
+}
+/* Web Serial 专属：桥接模式下浏览器可能根本没有 navigator.serial */
+if (!BRIDGE && SUPPORTED && navigator.serial && navigator.serial.addEventListener) {
+  navigator.serial.addEventListener('disconnect', event => {
+    if (port && event.target === port) {
+      disconnect().catch(e => log('设备断开处理失败：' + e.message, 'err'));
+    }
+  });
+}
 
 $('btnConnect').onclick    = connect;
 $('btnDisconnect').onclick = disconnect;
