@@ -126,19 +126,24 @@ nSLEEP。nFAULT 仅连接 PB2，不宣称已实现 TIM1_BKIN 硬件封波。电�
 实测结论，详见 [g431-闭环打通-2026-10-27.md](../docs/g431-闭环打通-2026-10-27.md)：
 
 - 开环正弦换相连续转动：0.8 V 幅值、1 Hz 电频率、4 s → 位移 -2.009 rad，峰值 0.355 A。
-- **极对数 11**（电机参数表里的 7 是错的）、**编码器方向 -1**、**电气零点 1.697 rad**，已写入 User/motor_config.h。
+- **极对数 11**（电机参数表里的 7 是错的）、**编码器方向 -1**、**电气零点 1.697 rad**，已写入 `User/motor_config.h`。
 - 位置闭环：0.3 rad / 1.0 rad 阶跃稳态误差 ≤0.15°（0.0026 rad），3 rad 阶跃 ≤0.23°（0.0040 rad）。
-- 电压上限扫描 2.5 / 4 / 6 / 8 V（3 rad 阶跃）：峰值相电流 0.77 / 0.37 / 0.35 / 0.30 A，全部 code=0、无跳闸。
+- 电压上限扫描 2.5 / 4 / 6 / 8 V（3 rad 阶跃）：峰值相电流 0.77 / 0.37 / 0.35 / 0.30 A，全部 `code=0`、无跳闸。
   **上限越高电流越小**（位置环只取所需电压，低上限反而更容易长时间饱和）→ 防烧靠电流限幅，不是压电压上限。
-- 三个 ADC 根因已修：① ADC12 时钟必须用 SYSCLK（PLLP 下 ADCAL 永不完成）；② CFGR.JQDIS=1
-  是软件触发注入组的前提；③ **TIM1_CC4 直接触发在本板不产生转换，改 TIM1_TRGO（CR2.MMS=7）才工作**
-  （诊断字段 cs_trig 稳定为 2）。
-- nFAULT 上电会锁存为低 → 驱动永久睡眠、SOx 偏置从 1.72 V 掉到 0.6 V。现在 oard_driver_set(1)
+- 三个 ADC 根因已修：① ADC12 时钟必须用 SYSCLK（PLLP 下 `ADCAL` 永不完成）；② `CFGR.JQDIS=1`
+  是软件触发注入组的前提；③ **TIM1_CC4 直接触发在本板不产生转换，改 TIM1_TRGO（`CR2.MMS=7`）才工作**
+  （诊断字段 `cs_trig` 稳定为 2）。
+- nFAULT 上电会锁存为低 → 驱动永久睡眠、SOx 偏置从 1.72 V 掉到 0.6 V。现在 `board_driver_set(1)`
   先脉冲 nSLEEP 复位锁存，主循环空闲时每 500 ms 自恢复并重标零。
-- CAN 仍不可用：TJA1042 的 VCC 取自板上 5V 网络，本板 DRV 内部 buck 已坏、当前只有 ST-Link 的 3.3 V
-  → 收发器无电。接上外部 5V 后 	ools/g431_can.py 即可用（已处理 pyusb 缺 libusb 的问题）。
-- 台架自测宏：G431_SPIN_TEST / G431_ALIGN_TEST / G431_CLOSEDLOOP_TEST / G431_BENCH_CURRENT_TEST /
-  G431_CURRENT_LOCK_TEST，任一为 1 时自动 G431_BENCH_MODE=1 并跳过 CAN（否则 bus-off 会持续请求停机）。
+- **CAN 已打通**（接上外部 5V 后）：candleLight/gs_usb 500 kbit/s，`E/D/T/V/L/?` 全部可用。工具：
+  `tools/g431_can.py`（单命令）、`tools/g431_can_move.py`（连续摆动 + 状态轮询 + CSV）、
+  `tools/g431_can_step.py`（阶跃响应）。之前一帧都收不到就是 TJA1042 的 VCC 走板上 5V 而没有 5V。
+- 连续运动 72 s（8 V 上限、±2.5 rad）：峰值 0.43 A、I²t 0、无跳闸。1 rad 阶跃在 2.5 V 与 8 V 下响应一致
+  （都是 0.77 s 内进入 ±0.01 rad，超调 ≤0.27°）→ 常规运动 2.5 V 足够，8 V 只对高速/大加速度有意义。
+- 限流链路已在硬件上验证：临时压低阈值后 `allowed` 按公式从 8 V 折到 7.30 V，峰值 0.31 A 越过 trip 时
+  电机立即失能、电流归零；恢复 soft 1.6 / trip 2.6 后正常。
+- 台架自测宏：`G431_SPIN_TEST` / `G431_ALIGN_TEST` / `G431_CLOSEDLOOP_TEST` / `G431_BENCH_CURRENT_TEST` /
+  `G431_CURRENT_LOCK_TEST`，任一为 1 时自动 `G431_BENCH_MODE=1` 并跳过 CAN（否则 bus-off 会持续请求停机）。
   **交付固件必须全部置 0。**
 ## CAN 协议
 

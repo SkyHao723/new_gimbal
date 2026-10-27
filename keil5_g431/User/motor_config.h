@@ -19,8 +19,8 @@
    instantaneous instruction to stop; the winding may sit at the rated current
    for CURRENT_LIMIT_THERMAL_TAU_S before the I^2t budget removes the drive. */
 #define CURRENT_LIMIT_RATED_A        1.4f
-#define CURRENT_LIMIT_SOFT_A         1.6f
-#define CURRENT_LIMIT_TRIP_A         2.6f
+#define CURRENT_LIMIT_SOFT_A        1.6f
+#define CURRENT_LIMIT_TRIP_A        2.6f
 #define CURRENT_LIMIT_FOLD_V_PER_A   10.0f
 #define CURRENT_LIMIT_VOLTAGE_FLOOR  1.5f
 #define CURRENT_LIMIT_PEAK_DECAY_S   0.05f
