@@ -1,10 +1,13 @@
 #ifndef MOTOR_CONFIG_H
 #define MOTOR_CONFIG_H
 
+#include "calib.h"
+
 /* Inherited motor parameters. Recheck direction/zero after changing phases or magnet. */
 #define MOTOR_POLE_PAIRS          11
-#define MOTOR_SENSOR_DIRECTION -1
-#define MOTOR_ZERO_ELECTRIC     1.697f
+#define MOTOR_SENSOR_DIRECTION CALIB_SENSOR_DIRECTION
+/* Per-board value; see User/calib.h (each motor has its own magnet mounting). */
+#define MOTOR_ZERO_ELECTRIC     CALIB_ZERO_ELECTRIC
 #define MOTOR_SUPPLY_VOLTAGE      24.0f
 /* Voltage command and the absolute software ceiling for the V command. The
    ceiling is only reachable while the measured phase current stays near
