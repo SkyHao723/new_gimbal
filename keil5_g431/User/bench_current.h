@@ -111,28 +111,4 @@ void bench_cl_save(int slot);
 int bench_cl_run(Motor *motor, float v_limit, float step_rad,
                  uint32_t settle_ms, uint32_t hold_ms, int steps);
 
-/* 抖动诊断：把控制循环的真实波形抓进 RAM，再用 SWD 读出来做频谱分析。
-   bench_capture[] 每行 3 个 float，按采样顺序排列（采样率 = 控制循环频率）：
-     [0] 机械角 radians   [1] 滤波后速度 rad/s   [2] 速度环输出电压 uq
-   bench_capture_meta[]：
-     [0] 结果码（0 正常，-2 使能被拒）   [1] 实际采样数
-     [2] 电压上限 V                     [3] 目标角
-     [4] 起始角                         [5] 结束角
-     [6] 峰值相电流 A                   [7] 过流跳闸计数
-     [8] 采样持续时长 s                 [9] 保留
-   L<速度> 命令会限制轨迹最大速度：长距离移动时中间段是匀速段，便于观察匀速
-   时的速度纹波（抖动的直接来源）。 */
-#define BENCH_CAPTURE_N    1200
-#define BENCH_CAPTURE_COLS 3
-#define BENCH_CAPTURE_META 10
-/* Store only every Nth control-loop sample.  The loop runs at ~1.9 kHz, so the
-   1200-word buffer covers just 0.63 s at N=1; N=4 stretches the same buffer to
-   2.5 s at ~478 Hz, which is what it takes to see the slow surge the operator
-   feels, while keeping 2.5 ms of timing resolution. */
-#define BENCH_CAPTURE_DECIM 4
-extern volatile float bench_capture[BENCH_CAPTURE_N * BENCH_CAPTURE_COLS];
-extern volatile float bench_capture_meta[BENCH_CAPTURE_META];
-int bench_capture_run(Motor *motor, float v_limit, float step_rad,
-                      uint32_t settle_ms, uint32_t capture_ms);
-
 #endif

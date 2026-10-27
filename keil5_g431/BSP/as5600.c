@@ -2,15 +2,8 @@
 #include "as5600.h"
 #include "board.h"
 #include "encoder_tracking.h"
-#include "motor_config.h"
 
-/* 软件 I2C 半周期。AS5600 支持 400 kHz，但这里是 bit-bang，实际速度取决于
-   pause_us() 的粒度（1 µs 计时器 + 调用开销）。设得太小会读错，判据是
-   g431_diagnostics.sensor_errors 保持 0。 */
-#ifndef ENCODER_I2C_HALF_US
-#define ENCODER_I2C_HALF_US 25u
-#endif
-#define I2C_HALF_PERIOD_US ENCODER_I2C_HALF_US
+#define I2C_HALF_PERIOD_US 25u
 #define I2C_STRETCH_TIMEOUT_US 250u
 #define AS5600_ADDRESS_WRITE 0x6cu
 #define AS5600_ADDRESS_READ  0x6du
