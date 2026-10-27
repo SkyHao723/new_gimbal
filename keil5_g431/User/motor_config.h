@@ -33,7 +33,7 @@
 #define MOTOR_VOLTAGE_RAMP        1000.0f
 #define MOTOR_VELOCITY_FILTER_TF  0.02f
 #define MOTOR_ANGLE_P             40.0f
-#define MOTOR_TARGET_SLEW         6.0f
+#define MOTOR_TARGET_SLEW         20.0f /* [rad/s] 轨迹巡航上限；L 命令实际受它限制 */
 #define MOTOR_TARGET_ACCEL        8.0f  /* rad/s^2; 0 -> 6 rad/s in 0.75s */
 #define MOTOR_TARGET_DECEL        4.0f  /* retain the validated gentle braking */
 
