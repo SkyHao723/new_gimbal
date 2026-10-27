@@ -130,6 +130,17 @@ int main(void)
            (double)bench_spin_result[4], (double)bench_spin_result[10],
            (double)bench_spin_result[3]);
 #endif
+#if G431_CAPTURE_TEST
+    /* Jitter diagnosis: cap the trajectory speed so the capture window sits in
+       the constant-velocity part of a long move, then record the loop waveform
+       into bench_capture[] for an SWD dump + FFT. */
+    (void)motor_command(&motor, "L2");
+    (void)bench_capture_run(&motor, 2.5f, 6.0f, 600u, 2600u);
+    printf("capture: code=%.0f n=%.0f uq_last=%.3f worst=%.3fA\r\n",
+           (double)bench_capture_meta[0], (double)bench_capture_meta[1],
+           (double)bench_capture[(int)bench_capture_meta[1] * BENCH_CAPTURE_COLS - 1],
+           (double)bench_capture_meta[6]);
+#endif
 #if G431_CURRENT_LOCK_TEST
     /* One-shot gain calibration: repeatedly hold A-B at 0.6 V for 30 s with a
        20 s quiet gap, so a multimeter can be clipped on at any time. Read
