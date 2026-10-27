@@ -14,12 +14,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('label')
     parser.add_argument('--port', default='COM8')
-    parser.add_argument('--target', type=float, default=math.pi)
+    destination = parser.add_mutually_exclusive_group()
+    destination.add_argument('--target', type=float, default=math.pi)
+    destination.add_argument('--delta', type=float, help='relative move from the initial sampled angle, rad')
     parser.add_argument('--seconds', type=float, default=4.5)
     parser.add_argument('--flash', type=Path)
     parser.add_argument('--output', type=Path, default=Path('D:/dsh_build/releases/position-response'))
     args = parser.parse_args()
-    if not math.isfinite(args.target) or not 1.0 <= args.seconds <= 4.5:
+    if (not math.isfinite(args.target) or
+            (args.delta is not None and not math.isfinite(args.delta)) or
+            not 1.0 <= args.seconds <= 4.5):
         parser.error('finite target and 1 <= seconds <= 4.5 required')
     args.output.mkdir(parents=True, exist_ok=True)
     samples, lines = [], []
@@ -65,6 +69,8 @@ def main():
         send('L20')
         time.sleep(0.05)
         initial = status()
+        if args.delta is not None:
+            args.target = initial['angle']+args.delta
         if abs(args.target-initial['angle']) > 6.5:
             raise RuntimeError('requested displacement exceeds one-turn test bound')
         send('E')

@@ -1,0 +1,23 @@
+{
+  "first_angle_deg": 41.308594779454424,
+  "last_angle_deg": 206.10352635626268,
+  "change_deg": 164.79493157680827,
+  "span_deg": 164.9707133252877,
+  "elapsed_s": 18.556,
+  "successful_reads_delta": 4505,
+  "communication_errors_delta": 0,
+  "sampled_statuses": [
+    51
+  ],
+  "agc_range": [
+    128,
+    128
+  ],
+  "magnitude_range": [
+    946,
+    985
+  ],
+  "motor_pulses": 0,
+  "drive_disabled_all_samples": true,
+  "firmware_sha256": "A45BBE3B06F691C8BFF6D00CEF828BC6949AC7ACDEB985B5FA5C30B142A19D44"
+}

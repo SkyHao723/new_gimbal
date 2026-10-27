@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-27",
+  "bus": "software I2C on PB6=SCL, PB7=SDA",
+  "post_flash_elapsed_seconds": 2.272,
+  "post_flash_successful_reads_delta": 551,
+  "post_flash_effective_sample_rate_hz": 242.51760563380284,
+  "post_flash_communication_errors_delta": 0,
+  "motor_disabled_every_sample": true,
+  "diagnostic_firmware_sha256": "82B50BB95E79255BA11CF632822FB2F9188B13DA551E1DB49442B6C5C6EFEF18",
+  "diagnostic_build": "ARMCC 5.06, 0 errors, 0 warnings",
+  "normal_g431_foc_build": "ARMCC 5.06, 0 errors, 0 warnings; not flashed because board DRVOFF is tied to ground and legacy BSP assumes PB1 controls it",
+  "encoder_magnetic_warning": "ML retained in telemetry and deferred per user request"
+}

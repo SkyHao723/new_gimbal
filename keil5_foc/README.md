@@ -1,5 +1,7 @@
 # STM32F103C8T6 电机控制：Keil5 标准库工程
 
+当前板上候选与实测：[到位收敛优化](../docs/到位收敛优化-2026-10-16.md)。
+
 2026-10-16，从 `../foc_official/src/main.cpp` 当前 PlatformIO 版本迁移。
 这是 **纯 C99 + STM32F10x 标准外设库 V3.5.0** 的独立工程，包含本地 CMSIS、
 启动文件和用到的 SPL 源码，不需要 Arduino、PlatformIO 或原厂旧 SimpleFOC C 库。
@@ -33,7 +35,7 @@
 | 三相 PWM | PA8 / PA9 / PA10，TIM1 CH1/2/3，约 25kHz 中心对齐 |
 | 驱动 EN | PB0，高电平使能 |
 | USB-TTL | PA2 TX / PA3 RX，USART2，115200 8N1 |
-| AS5600 | PB6 SCL / PB7 SDA，I2C1，100kHz，地址 0x36 |
+| AS5600 | PB6 SCL / PB7 SDA，I2C1，400kHz，地址 0x36 |
 | 调试 | PA13 / PA14，SWD；仅关闭 JTAG，保留 SWD |
 | LED | PC13 |
 
@@ -46,9 +48,9 @@
 | 极对数 / 编码器方向 | 11 / CW（+1） |
 | 固定电角度零点 | 0.92 rad |
 | 母线参数 / 初始电压上限 / 硬上限 | 24V / 3V / 5V |
-| 速度 PI | P=0.6，I=2，电压斜率 1000V/s |
-| 位置 P / 速度低通 | 30 / 0.02s |
-| 位置轨迹 | 梯形加减速，最高 4 rad/s（服从 L），加速度 4 rad/s²，含规划速度前馈 |
+| 速度 PI | P=0.6，I=5，电压斜率 1000V/s |
+| 位置 P / 速度低通 | 40 / 0.02s |
+| 位置轨迹 | 梯形加减速，最高 6 rad/s（服从 L），加速度 8、减速度 4 rad/s²，含规划速度前馈 |
 | 速度上限 | 默认 20 rad/s，串口允许 0 < L <= 20 |
 | 上电自检 | 正向一圈，4 rad/s，剩余角度 <=0.03 rad 时失能；10 秒超时失能 |
 
@@ -86,7 +88,8 @@ TX 使用 1024 字节中断缓冲，正常状态查询不会逐字节阻塞 FOC 
 - `Control/foc_math.c`：从官方 SimpleFOC 2.4.0 的 PI、65 点正弦表和逆 Park/Clarke +
   中点钳位 SVPWM 移植，保留 MIT 版权声明，见 `LICENSE-SimpleFOC.txt`。
 - `Control/motor.c`：位置/速度控制、轨迹速度前馈、固定校准、上电单圈状态和串口命令。
-- `Control/trajectory.c`：梯形速度规划、加减速、运动中重规划和降速制动。
+- `Control/trajectory.c`：独立加减速的梯形速度规划、运动中重规划、降速制动；
+  从段起点和经过时间计算位置，避免多圈参考位置逐步累加误差。
 - `Control/encoder_tracking.c`：12 位角度解圈、速度差分和低通。
 - `BSP/as5600.c`：按 STM32F1 两字节接收时序读取 0x0C/0x0D；每个等待点有 2ms 超时，
   失败时发 STOP、恢复总线。传感器读取失败会失能，需要重新 E 才恢复输出。
@@ -105,9 +108,9 @@ TX 使用 1024 字节中断缓冲，正常状态查询不会逐字节阻塞 FOC 
 2026-10-16，Keil µVision5 + ARMCC 5.06 完整 Rebuild：**0 Error(s), 0 Warning(s)**。
 
 ```text
-Program Size: Code=14176 RO-data=592 RW-data=68 ZI-data=3892
-Flash: 14836 bytes（Code + RO-data + RW-data）
-RAM:    3960 bytes（RW-data + ZI-data，含 2KB 栈和 512B 堆）
+Program Size: Code=14544 RO-data=592 RW-data=68 ZI-data=3924
+Flash: 15204 bytes（Code + RO-data + RW-data）
+RAM:    3992 bytes（RW-data + ZI-data，含 2KB 栈和 512B 堆）
 ```
 
 构建日志：`Objects/keil_build.log`；链接映射：`Listings/gimbal_foc.map`。
@@ -136,3 +139,8 @@ D 失能及传感器故障处理。测试使用模拟角度输入，不代表实
 通过调整反馈增益和滤波，同方向、相近起点的测试中，规划结束后首秒摆幅降至约 0.53°，
 末一秒约 0.09°；另完成 0 ↔ π 测试。用户随后实测确认有明显改善，授权提交和推送。
 该反馈参数版本和相关采样纳入版本管理，详见 [到位振荡调参](../docs/到位振荡调参-2026-10-16.md)。
+
+上述改善版已提交为 `8b74ca8` 并推送至 `origin/main`。之后的提速候选采用独立加减速度，
+最高参考速度 6rad/s，新增 294 组轨迹测试及多圈精度回归，已烧录并完成正反整圈、0/π 测试。
+整圈规划约 2.61s → 2.20s，末段摆幅约 0.09°；零点附近仍有约 1.58° 的瞬态超调，
+本轮候选尚未提交，详细数据和回退方法见 [提速与柔和制动](../docs/提速与柔和制动-2026-10-16.md)。

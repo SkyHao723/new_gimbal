@@ -1,0 +1,149 @@
+      -------------------------------------------------------------------
+                       STM32CubeProgrammer v2.22.0                  
+      -------------------------------------------------------------------
+
+ST-LINK SN  : 37FF71064E57343682CD1A43
+ST-LINK FW  : V2J37S7
+Board       : --
+Voltage     : 3.24V
+SWD freq    : 950 KHz
+Connect mode: Hot Plug
+Reset mode  : Software reset
+Device ID   : 0x468
+Revision ID : Rev X
+Device name : STM32G43x/G44x
+NVM size  : 128 KBytes
+Device type : MCU
+Device CPU  : Cortex-M4
+BL Version  : 0xD4
+
+
+Reading 32-bit memory content
+  Size          : 152 Bytes
+  Address:      : 0x20000040
+0x20000040 : 42555033 00000000 00000000 00000002
+0x20000050 : 0A21FE80 001AEE7D 2D717990 00000000
+0x20000060 : 00000000 00000000 00000000 00000000
+0x20000070 : 00000000 00000000 00000000 00000000
+0x20000080 : 000000D0 00000000 00000000 00000000
+0x20000090 : 00000000 00000D48 0004F7CC 00000000
+0x200000A0 : 0006896C 00000000 000007B5 00000033
+0x200000B0 : 0006896C 001AEE7D 4041B2E6 80000001
+0x200000C0 : 00000000 00000000 000007B5 00000080
+0x200000D0 : 000003DB 001AEE26
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x40012C44
+0x40012C44 : 00000000
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x48000414
+0x48000414 : 000000C0
+
+
+
+      -------------------------------------------------------------------
+                       STM32CubeProgrammer v2.22.0                  
+      -------------------------------------------------------------------
+
+ST-LINK SN  : 37FF71064E57343682CD1A43
+ST-LINK FW  : V2J37S7
+Board       : --
+Voltage     : 3.24V
+SWD freq    : 950 KHz
+Connect mode: Hot Plug
+Reset mode  : Software reset
+Device ID   : 0x468
+Revision ID : Rev X
+Device name : STM32G43x/G44x
+NVM size  : 128 KBytes
+Device type : MCU
+Device CPU  : Cortex-M4
+BL Version  : 0xD4
+
+
+Reading 32-bit memory content
+  Size          : 152 Bytes
+  Address:      : 0x20000040
+0x20000040 : 42555033 00000000 00000000 00000002
+0x20000050 : 0A21FE80 001AEF92 2D7346F9 00000000
+0x20000060 : 00000000 00000000 00000000 00000000
+0x20000070 : 00000000 00000000 00000000 00000000
+0x20000080 : 000000D0 00000000 00000000 00000000
+0x20000090 : 00000000 00000D48 0004F7FF 00000000
+0x200000A0 : 000689AF 00000000 000007B5 00000033
+0x200000B0 : 000689AF 001AEF92 4041B2E6 80000001
+0x200000C0 : 00000000 00000000 000007B5 00000080
+0x200000D0 : 000003DB 001AEF5B
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x40012C44
+0x40012C44 : 00000000
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x48000414
+0x48000414 : 000000C0
+
+
+
+      -------------------------------------------------------------------
+                       STM32CubeProgrammer v2.22.0                  
+      -------------------------------------------------------------------
+
+ST-LINK SN  : 37FF71064E57343682CD1A43
+ST-LINK FW  : V2J37S7
+Board       : --
+Voltage     : 3.24V
+SWD freq    : 950 KHz
+Connect mode: Hot Plug
+Reset mode  : Software reset
+Device ID   : 0x468
+Revision ID : Rev X
+Device name : STM32G43x/G44x
+NVM size  : 128 KBytes
+Device type : MCU
+Device CPU  : Cortex-M4
+BL Version  : 0xD4
+
+
+Reading 32-bit memory content
+  Size          : 152 Bytes
+  Address:      : 0x20000040
+0x20000040 : 42555033 00000000 00000000 00000002
+0x20000050 : 0A21FE80 001AF040 2D74634A 00000000
+0x20000060 : 00000000 00000000 00000000 00000000
+0x20000070 : 00000000 00000000 00000000 00000000
+0x20000080 : 000000D0 00000000 00000000 00000000
+0x20000090 : 00000000 00000D48 0004F81F 00000000
+0x200000A0 : 000689D9 00000000 000007B5 00000033
+0x200000B0 : 000689D9 001AF040 4041B2E6 80000001
+0x200000C0 : 00000000 00000000 000007B5 00000080
+0x200000D0 : 000003DB 001AF029
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x40012C44
+0x40012C44 : 00000000
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x48000414
+0x48000414 : 000000C0
+
+

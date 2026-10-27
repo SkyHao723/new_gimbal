@@ -1,0 +1,22 @@
+{
+  "magic": 1194603313,
+  "stage": 4,
+  "core_clock": 170000000,
+  "uptime_ms": 169269,
+  "loops": 56428,
+  "enabled": 0,
+  "sleep_high": 1,
+  "off_high": 1,
+  "fault_high": 1,
+  "sensor_valid": 0,
+  "sensor_errors": 56419,
+  "can_psr": 1903,
+  "can_ecr": 216,
+  "tx_dropped": 0,
+  "angle": 0.0,
+  "velocity": 0.0,
+  "cfsr": 0,
+  "hfsr": 0,
+  "source": "SWD read at 0x200000D8 before final atomic-command protocol change",
+  "note": "bring-up snapshot, not final CAN protocol or motion validation"
+}

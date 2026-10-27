@@ -1,0 +1,199 @@
+      -------------------------------------------------------------------
+                       STM32CubeProgrammer v2.22.0                  
+      -------------------------------------------------------------------
+
+ST-LINK SN  : 37FF71064E57343682CD1A43
+ST-LINK FW  : V2J37S7
+Board       : --
+Voltage     : 3.24V
+SWD freq    : 950 KHz
+Connect mode: Hot Plug
+Reset mode  : Software reset
+Device ID   : 0x468
+Revision ID : Rev X
+Device name : STM32G43x/G44x
+NVM size  : 128 KBytes
+Device type : MCU
+Device CPU  : Cortex-M4
+BL Version  : 0xD4
+
+
+Reading 32-bit memory content
+  Size          : 152 Bytes
+  Address:      : 0x20000040
+0x20000040 : 42555033 00000000 00000000 00000002
+0x20000050 : 0A21FE80 00018EE3 02A11C3B 00000000
+0x20000060 : 00000000 00000000 00000000 00000000
+0x20000070 : 00000000 00000000 00000000 00000000
+0x20000080 : 000000D0 00000000 00000000 00000000
+0x20000090 : 00000000 00000D48 00004995 00000000
+0x200000A0 : 000060D2 00000000 0000075E 00000033
+0x200000B0 : 000060D2 00018EE5 4039285A BBF83694
+0x200000C0 : 00000000 00000000 0000075E 00000080
+0x200000D0 : 000003D9 00018EB6
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x40012C44
+0x40012C44 : 00000000
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x48000414
+0x48000414 : 000000C0
+
+
+
+      -------------------------------------------------------------------
+                       STM32CubeProgrammer v2.22.0                  
+      -------------------------------------------------------------------
+
+ST-LINK SN  : 37FF71064E57343682CD1A43
+ST-LINK FW  : V2J37S7
+Board       : --
+Voltage     : 3.24V
+SWD freq    : 950 KHz
+Connect mode: Hot Plug
+Reset mode  : Software reset
+Device ID   : 0x468
+Revision ID : Rev X
+Device name : STM32G43x/G44x
+NVM size  : 128 KBytes
+Device type : MCU
+Device CPU  : Cortex-M4
+BL Version  : 0xD4
+
+
+Reading 32-bit memory content
+  Size          : 152 Bytes
+  Address:      : 0x20000040
+0x20000040 : 42555033 00000000 00000000 00000002
+0x20000050 : 0A21FE80 0001904D 02A38E74 00000000
+0x20000060 : 00000000 00000000 00000000 00000000
+0x20000070 : 00000000 00000000 00000000 00000000
+0x20000080 : 000000D0 00000000 00000000 00000000
+0x20000090 : 00000000 00000D48 000049D7 00000000
+0x200000A0 : 0000612A 00000000 0000075E 00000033
+0x200000B0 : 0000612A 0001904E 4039285A BBA91B0C
+0x200000C0 : 00000000 00000000 0000075E 00000080
+0x200000D0 : 000003D8 00018FEB
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x40012C44
+0x40012C44 : 00000000
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x48000414
+0x48000414 : 00000080
+
+
+
+      -------------------------------------------------------------------
+                       STM32CubeProgrammer v2.22.0                  
+      -------------------------------------------------------------------
+
+ST-LINK SN  : 37FF71064E57343682CD1A43
+ST-LINK FW  : V2J37S7
+Board       : --
+Voltage     : 3.24V
+SWD freq    : 950 KHz
+Connect mode: Hot Plug
+Reset mode  : Software reset
+Device ID   : 0x468
+Revision ID : Rev X
+Device name : STM32G43x/G44x
+NVM size  : 128 KBytes
+Device type : MCU
+Device CPU  : Cortex-M4
+BL Version  : 0xD4
+
+
+Reading 32-bit memory content
+  Size          : 152 Bytes
+  Address:      : 0x20000040
+0x20000040 : 42555033 00000000 00000000 00000002
+0x20000050 : 0A21FE80 000191B4 02A5DCA6 00000000
+0x20000060 : 00000000 00000000 00000000 00000000
+0x20000070 : 00000000 00000000 00000000 00000000
+0x20000080 : 000000D0 00000000 00000000 00000000
+0x20000090 : 00000000 00000D48 00004A1A 00000000
+0x200000A0 : 00006181 00000000 0000075E 00000033
+0x200000B0 : 00006181 000191B6 4039285A BB4E72DE
+0x200000C0 : 00000000 00000000 0000075E 00000080
+0x200000D0 : 000003D9 00019187
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x40012C44
+0x40012C44 : 00000000
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x48000414
+0x48000414 : 00000080
+
+
+
+      -------------------------------------------------------------------
+                       STM32CubeProgrammer v2.22.0                  
+      -------------------------------------------------------------------
+
+ST-LINK SN  : 37FF71064E57343682CD1A43
+ST-LINK FW  : V2J37S7
+Board       : --
+Voltage     : 3.24V
+SWD freq    : 950 KHz
+Connect mode: Hot Plug
+Reset mode  : Software reset
+Device ID   : 0x468
+Revision ID : Rev X
+Device name : STM32G43x/G44x
+NVM size  : 128 KBytes
+Device type : MCU
+Device CPU  : Cortex-M4
+BL Version  : 0xD4
+
+
+Reading 32-bit memory content
+  Size          : 152 Bytes
+  Address:      : 0x20000040
+0x20000040 : 42555033 00000000 00000000 00000002
+0x20000050 : 0A21FE80 00019250 02A6F35B 00000000
+0x20000060 : 00000000 00000000 00000000 00000000
+0x20000070 : 00000000 00000000 00000000 00000000
+0x20000080 : 000000D0 00000000 00000000 00000000
+0x20000090 : 00000000 00000D48 00004A36 00000000
+0x200000A0 : 000061A7 00000000 0000075E 00000033
+0x200000B0 : 000061A7 00019251 4039285A B8D5EA99
+0x200000C0 : 00000000 00000000 0000075E 00000080
+0x200000D0 : 000003DA 000191EE
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x40012C44
+0x40012C44 : 00000000
+
+
+
+Reading 32-bit memory content
+  Size          : 4 Bytes
+  Address:      : 0x48000414
+0x48000414 : 00000080
+
+

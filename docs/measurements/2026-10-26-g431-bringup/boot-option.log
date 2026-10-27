@@ -1,0 +1,62 @@
+      -------------------------------------------------------------------
+                       STM32CubeProgrammer v2.22.0                  
+      -------------------------------------------------------------------
+
+ST-LINK SN  : 37FF71064E57343682CD1A43
+ST-LINK FW  : V2J37S7
+Board       : --
+Voltage     : 3.24V
+SWD freq    : 950 KHz
+Connect mode: Under Reset
+Reset mode  : Hardware reset
+Device ID   : 0x468
+Revision ID : Rev X
+Device name : STM32G43x/G44x
+NVM size  : 128 KBytes
+Device type : MCU
+Device CPU  : Cortex-M4
+BL Version  : 0xD4
+
+
+UPLOADING OPTION BYTES DATA ...
+
+  Bank          : 0x00
+  Address       : 0x40022020 
+  Size          : 84 Bytes
+
+�������������������������������������������������� 0%
+�������������������������������������������������� 100%
+
+
+PROGRAMMING OPTION BYTES AREA ...
+
+  Bank          : 0x00
+  Address       : 0x40022020 
+  Size          : 84 Bytes
+
+�������������������������������������������������� 50%
+�������������������������������������������������� 100%
+
+
+
+Reconnecting...
+Reconnected !
+
+
+UPLOADING OPTION BYTES DATA ...
+
+  Bank          : 0x00
+  Address       : 0x40022020 
+  Size          : 84 Bytes
+
+�������������������������������������������������� 50%
+�������������������������������������������������� 100%
+
+OPTION BYTE PROGRAMMING VERIFICATION:
+
+Option Bytes successfully programmed
+Time elapsed during option Bytes configuration: 00:00:01.256
+
+MCU Reset
+
+Software reset is performed

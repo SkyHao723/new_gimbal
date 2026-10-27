@@ -1,0 +1,74 @@
+      -------------------------------------------------------------------
+                       STM32CubeProgrammer v2.22.0                  
+      -------------------------------------------------------------------
+
+ST-LINK SN  : 37FF71064E57343682CD1A43
+ST-LINK FW  : V2J37S7
+Board       : --
+Voltage     : 3.24V
+SWD freq    : 950 KHz
+Connect mode: Hot Plug
+Reset mode  : Software reset
+Device ID   : 0x468
+Revision ID : Rev X
+Device name : STM32G43x/G44x
+NVM size  : 128 KBytes
+Device type : MCU
+Device CPU  : Cortex-M4
+BL Version  : 0xD4
+
+
+UPLOADING OPTION BYTES DATA ...
+
+  Bank          : 0x00
+  Address       : 0x40022020 
+  Size          : 84 Bytes
+
+�������������������������������������������������� 0%
+�������������������������������������������������� 100%
+
+
+OPTION BYTES BANK: 0
+
+   Read Out Protection:
+
+     RDP          : 0xAA (Level 0, no protection) 
+
+   BOR Level:
+
+     BOR_LEV      : 0x0 (BOR Level 0, reset level threshold is around 1.7 V) 
+
+   User Configuration:
+
+     nRST_STOP    : 0x1 (No reset generated when entering Stop mode) 
+     nRST_STDBY   : 0x1 (No reset generated when entering Standby mode) 
+     nRST_SHDW    : 0x1 (No reset generated when entering the Shutdown mode) 
+     IWDG_SW      : 0x1 (Software independent watchdog) 
+     IWDG_STOP    : 0x1 (IWDG counter active in stop mode) 
+     IWDG_STDBY   : 0x1 (IWDG counter active in standby mode) 
+     WWDG_SW      : 0x1 (Software window watchdog) 
+     nBOOT1       : 0x1 (Boot from Flash if BOOT0 = 0, otherwise system memory) 
+     SRAM_PE      : 0x1 (SRAM1 and CCM SRAM parity check disable) 
+     CCMSRAM_RST  : 0x1 (CCM SRAM is not erased when a system reset occurs) 
+     nSWBOOT0     : 0x1 (BOOT0 taken from PB8/BOOT0 pin) 
+     nBOOT0       : 0x1 (nBOOT0 = 1) 
+     NRST_MODE    : 0x3 (Bidirectional reset: NRST pin configured in reset input/output mode (legacy mode)) 
+     IRHEN        : 0x1 (Internal resets drives NRST pin low until it is seen as low level) 
+
+   PCROP Protection:
+
+     PCROP1_STRT  : 0x3FFF  (0x801FFF8) 
+     PCROP1_END   : 0x0  (0x8000008) 
+     PCROP_RDP    : 0x0 (PCROP zone is kept when RDP is decreased) 
+
+   Write Protection:
+
+     WRP1A_STRT   : 0x3F  (0x801F800) 
+     WRP1A_END    : 0x0  (0x8000000) 
+     WRP1B_STRT   : 0x3F  (0x801F800) 
+     WRP1B_END    : 0x0  (0x8000000) 
+
+   Secure Protection:
+
+     SEC_SIZE1    : 0x0  (0x8000000) 
+     BOOT_LOCK    : 0x0 (Boot based on the pad/option bit configuration) 

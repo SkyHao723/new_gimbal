@@ -167,7 +167,8 @@ void motor_command(Motor *motor, const char *command)
             printf("startup rotate ABORTED by target command\r\n");
         }
         motor->target = value;
-        trajectory_plan(&motor->path, value, fminf(MOTOR_TARGET_SLEW, motor->velocity_limit), MOTOR_TARGET_ACCEL);
+        trajectory_plan(&motor->path, value, fminf(MOTOR_TARGET_SLEW, motor->velocity_limit),
+                        MOTOR_TARGET_ACCEL, MOTOR_TARGET_DECEL);
         printf("target=%.4f\r\n", (double)value);
         break;
     case 'V':
@@ -184,7 +185,8 @@ void motor_command(Motor *motor, const char *command)
         }
         motor->velocity_limit = value;
         if (!motor->startup)
-            trajectory_plan(&motor->path, motor->target, fminf(MOTOR_TARGET_SLEW, value), MOTOR_TARGET_ACCEL);
+            trajectory_plan(&motor->path, motor->target, fminf(MOTOR_TARGET_SLEW, value),
+                            MOTOR_TARGET_ACCEL, MOTOR_TARGET_DECEL);
         printf("Vellim=%.2f\r\n", (double)value);
         break;
     case 'R':

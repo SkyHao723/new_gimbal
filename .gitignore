@@ -14,6 +14,8 @@ build/out/
 # Keil / MDK
 Objects/
 Listings/
+ObjectsBringup/
+ListingsBringup/
 DebugConfig/
 RTE/
 *.uvguix.*
@@ -26,3 +28,7 @@ RTE/
 *.swp
 Thumbs.db
 desktop.ini
+
+# Python diagnostic tools
+__pycache__/
+*.py[cod]

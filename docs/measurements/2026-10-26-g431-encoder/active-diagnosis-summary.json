@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-26",
+  "root_cause": "STM32G431CBTx PB6 has no I2C1_SCL alternate function; F103 pin mapping was incorrectly reused.",
+  "primary_source": "https://github.com/STMicroelectronics/STM32_open_pin_data",
+  "pin_evidence_files": [
+    "STM32G431C(6-8-B)Tx.xml",
+    "GPIO-STM32G43x_gpio_v1_0_Modes.xml"
+  ],
+  "pulse_firmware_sha256": "14A5EE231D18BE07B82FA26FBEEAA3E7B1684D568F876A786E91342FE75BC7B3",
+  "final_firmware_sha256": "F192A043B8879563DD6E275A77C7AB194BEFFDDD15CF5B3B7E682F7A9969995D",
+  "pulse_duration_ms": 1200,
+  "encoder_motion_degrees": -40.42969286724636,
+  "communication_errors_added": 0,
+  "sampled_active_nfault_all_high": true,
+  "sampled_status": [
+    51
+  ],
+  "active_magnitude_raw_range": [
+    977,
+    986
+  ],
+  "default_boot_reads_last": 456,
+  "default_boot_errors_last": 0,
+  "default_boot_no_motion": true,
+  "magnetic_warning": "ML retained in diagnostics; user requests deferral; no closed-loop commutation tested.",
+  "final_drive_state": "disabled"
+}

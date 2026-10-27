@@ -105,7 +105,12 @@ static void finish_path(Trajectory *p, float vmax, float amax)
         assert(fabsf(p->velocity-v)<=amax*dt+0.0001f);
         /* Integrated displacement must agree with bounded acceleration,
            including a step spanning segment boundaries or arrival. */
-        assert(fabsf(p->position-x-v*dt)<=0.5f*amax*dt*dt+0.0001f);
+        if (fabsf(p->position-x-v*dt)>0.5f*amax*dt*dt+0.0001f) {
+            printf("Trajectory discontinuity: target=%g x=%g v=%g newx=%g newv=%g dt=%g a=%g segment=%u/%u\n",
+                   p->target,x,v,p->position,p->velocity,dt,amax,p->segment,p->count);
+            fflush(stdout);
+            assert(0);
+        }
     }
     assert(i<20000 && p->position==p->target && p->velocity==0.0f);
     trajectory_step(p,0.01f);
@@ -115,21 +120,23 @@ static void finish_path(Trajectory *p, float vmax, float amax)
 static void test_trajectory(void)
 {
     Trajectory p;
-    int i, j, k, cases=0;
+    int i, j, k, n, cases=0;
     const float targets[]={-FOC_TWO_PI,-0.2f,-0.00001f,0.0f,0.00001f,0.2f,FOC_TWO_PI};
-    const float speeds[]={-6.0f,-4.0f,-0.1f,0.0f,0.1f,4.0f,6.0f};
-    const float limits[]={0.1f,1.0f,4.0f};
-    for (i=0; i<7; ++i) for (j=0; j<7; ++j) for (k=0; k<3; ++k) {
+    const float speeds[]={-1.5f*MOTOR_TARGET_SLEW,-MOTOR_TARGET_SLEW,-0.1f,0.0f,
+                          0.1f,MOTOR_TARGET_SLEW,1.5f*MOTOR_TARGET_SLEW};
+    const float limits[]={0.1f,1.0f,MOTOR_TARGET_SLEW};
+    const float accelerations[]={4.0f,MOTOR_TARGET_ACCEL};
+    for (i=0; i<7; ++i) for (j=0; j<7; ++j) for (k=0; k<3; ++k) for (n=0; n<2; ++n) {
         trajectory_reset(&p,0.0f);
         p.velocity=speeds[j];
-        trajectory_plan(&p,targets[i],limits[k],8.0f);
+        trajectory_plan(&p,targets[i],limits[k],accelerations[n],MOTOR_TARGET_DECEL);
         assert(p.position==0.0f && p.velocity==speeds[j]);
-        finish_path(&p,limits[k],8.0f);
+        finish_path(&p,limits[k],fmaxf(accelerations[n],MOTOR_TARGET_DECEL));
         ++cases;
     }
     /* Known one-turn trapezoid: accelerate .5s, cruise, brake .5s. */
     trajectory_reset(&p,0.0f);
-    trajectory_plan(&p,FOC_TWO_PI,4.0f,8.0f);
+    trajectory_plan(&p,FOC_TWO_PI,4.0f,8.0f,8.0f);
     trajectory_step(&p,0.5f);
     assert(fabsf(p.position-1.0f)<0.00001f && fabsf(p.velocity-4.0f)<0.00001f);
     trajectory_step(&p,(FOC_TWO_PI-2.0f)/4.0f);
@@ -141,30 +148,42 @@ static void test_trajectory(void)
     trajectory_reset(&p,2.0f);
     for (i=0; i<1000; ++i) {
         float x=p.position, v=p.velocity;
-        trajectory_plan(&p,(i%3-1)*2.0f,4.0f,8.0f);
+        trajectory_plan(&p,(i%3-1)*2.0f,MOTOR_TARGET_SLEW,MOTOR_TARGET_ACCEL,MOTOR_TARGET_DECEL);
         assert(p.position==x && p.velocity==v && p.count<=4u);
         trajectory_step(&p,0.017f);
-        assert(fabsf(p.velocity-v)<=8.0f*0.017f+0.0001f);
+        assert(fabsf(p.velocity-v)<=fmaxf(MOTOR_TARGET_ACCEL,MOTOR_TARGET_DECEL)*0.017f+0.0001f);
     }
-    finish_path(&p,4.0f,8.0f);
-    /* Lowering L from cruise preserves speed, then decelerates at amax. */
+    finish_path(&p,MOTOR_TARGET_SLEW,fmaxf(MOTOR_TARGET_ACCEL,MOTOR_TARGET_DECEL));
+    /* Lowering L from cruise preserves speed, then uses the braking limit. */
     trajectory_reset(&p,0.0f);
-    trajectory_plan(&p,10.0f,4.0f,8.0f);
+    trajectory_plan(&p,10.0f,4.0f,8.0f,8.0f);
     trajectory_step(&p,0.75f);
-    trajectory_plan(&p,10.0f,1.0f,8.0f);
+    trajectory_plan(&p,10.0f,1.0f,8.0f,MOTOR_TARGET_DECEL);
     assert(fabsf(p.velocity-4.0f)<0.00001f);
     trajectory_step(&p,0.125f);
-    assert(fabsf(p.velocity-3.0f)<0.00001f);
-    finish_path(&p,1.0f,8.0f);
+    assert(fabsf(p.velocity-(4.0f-MOTOR_TARGET_DECEL*0.125f))<0.00001f);
+    finish_path(&p,1.0f,fmaxf(8.0f,MOTOR_TARGET_DECEL));
+    /* Keep sub-count endpoint corrections even at multi-turn positions and
+       after a long slow cruise, where per-tick float addition used to drift. */
+    trajectory_reset(&p,90.0f);
+    p.velocity=9.0f;
+    trajectory_plan(&p,90.0f-FOC_TWO_PI,0.1f,4.0f,4.0f);
+    finish_path(&p,0.1f,4.0f);
+    trajectory_reset(&p,-100.0f);
+    trajectory_plan(&p,-100.0f+FOC_TWO_PI,MOTOR_TARGET_SLEW,MOTOR_TARGET_ACCEL,MOTOR_TARGET_DECEL);
+    finish_path(&p,MOTOR_TARGET_SLEW,MOTOR_TARGET_ACCEL);
     printf("Trajectory: %d endpoint/limit cases, variable dt, retarget/reverse, lowered L PASS\n",cases);
 }
 
 static void test_motor(void)
 {
     Motor m;
-    float start, integral;
-    int i;
+    float integral;
     motor_init(&m);
+#if STARTUP_ROTATE_ONCE
+    {
+    float start;
+    int i;
     assert(m.startup && driver_enabled);
     start=m.angle;
     for (i=1; i<=4096 && m.enabled; ++i) {
@@ -174,6 +193,14 @@ static void test_motor(void)
     assert(!m.enabled && !m.startup && !driver_enabled);
     assert(m.angle-start>=FOC_TWO_PI-STARTUP_ROTATE_TOLERANCE-0.002f);
     assert(m.angle-start<FOC_TWO_PI+0.002f);
+    }
+    puts("Motor boot: measured 360deg then disabled PASS");
+#else
+    assert(!m.enabled && !m.startup && !driver_enabled);
+    tick(&m);
+    assert(!m.enabled && !m.startup && !driver_enabled);
+    puts("Motor boot: stays disabled without E PASS");
+#endif
     motor_command(&m,"T100");
     motor_command(&m,"E");
     assert(m.enabled && m.target==m.angle);
@@ -186,7 +213,7 @@ static void test_motor(void)
     motor_command(&m,"Tnan"); assert(m.target==8.0f);
     motor_command(&m,"T1junk"); assert(m.target==8.0f);
     motor_command(&m,"T   "); assert(m.target==8.0f);
-    motor_command(&m,"V99"); assert(m.voltage_limit==5.0f);
+    motor_command(&m,"V99"); assert(m.voltage_limit==MOTOR_MAX_VOLTAGE);
     motor_command(&m,"L-1"); assert(m.velocity_limit==20.0f);
     motor_command(&m,"D"); tick(&m); assert(!m.enabled && !driver_enabled);
     motor_command(&m,"E"); sensor_ok=0; tick(&m);
@@ -195,7 +222,7 @@ static void test_motor(void)
     sensor_ok=1;
     motor_init(&m);
     fake_ms+=10000u; tick(&m); assert(!m.enabled && !driver_enabled);
-    puts("Motor: measured 360deg, timeout, E idempotence, trajectory, parsing, limits, D, sensor fault PASS");
+    puts("Motor: boot timeout/disabled, E idempotence, trajectory, parsing, limits, D, sensor fault PASS");
 }
 
 static void test_closed_loop_reference(void)

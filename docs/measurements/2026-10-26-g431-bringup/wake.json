@@ -1,0 +1,29 @@
+[
+  {
+    "magic": 1112887345,
+    "request": 0,
+    "ack": 0,
+    "stage": 2,
+    "clock_hz": 170000000,
+    "uptime_ms": 50225,
+    "loops": 139923606,
+    "sleep_high": 0,
+    "fault_high": 0,
+    "moe": 0,
+    "active": 0,
+    "stop_reason": 0,
+    "started_ms": 0,
+    "ended_ms": 0,
+    "pulses": 0,
+    "updates": 0,
+    "gpiob_idr": 16,
+    "cfsr": 0,
+    "hfsr": 0,
+    "uq": 0.0,
+    "electrical_angle": 0.0,
+    "pwm_period": 3400,
+    "heartbeat": 10045,
+    "live_moe": false,
+    "live_sleep": false
+  }
+]

@@ -1,0 +1,90 @@
+[
+  {
+    "label": "fast6a8-minus2pi",
+    "reference_done": 1.827999999979511,
+    "settle_03deg": 2.6869999999180436,
+    "stop_span_deg": 0.5271211715203756,
+    "tail_span_deg": 0.09167324722094707,
+    "final_error_deg": 0.005729577951320323,
+    "overshoot_deg": 0.5213915935690553,
+    "peak_velocity": 6.5343,
+    "peak_reference_velocity": 6.0
+  },
+  {
+    "label": "fast6a8-pluspi",
+    "reference_done": 1.297000000020489,
+    "settle_03deg": 1.5940000000409782,
+    "stop_span_deg": 0.35523383298109673,
+    "tail_span_deg": 0.09167324722092161,
+    "final_error_deg": 0.0,
+    "overshoot_deg": 0.35523383298109673,
+    "peak_velocity": 4.8268,
+    "peak_reference_velocity": 4.9129
+  },
+  {
+    "label": "fast6a8d4-minus2pi",
+    "reference_done": 2.202999999979511,
+    "settle_03deg": 2.125,
+    "stop_span_deg": 0.17188733853925348,
+    "tail_span_deg": 0.08594366926962674,
+    "final_error_deg": 0.0,
+    "overshoot_deg": 0.17188733853925348,
+    "peak_velocity": 6.082,
+    "peak_reference_velocity": 5.7634
+  },
+  {
+    "label": "fast6a8d4-pi-from0",
+    "reference_done": 1.593000000109896,
+    "settle_03deg": 1.5619999999180436,
+    "stop_span_deg": 0.34950425502980187,
+    "tail_span_deg": 0.0,
+    "final_error_deg": 0.0,
+    "overshoot_deg": 0.2635605857601751,
+    "peak_velocity": 4.1121,
+    "peak_reference_velocity": 4.0769
+  },
+  {
+    "label": "fast6a8d4-plus2pi",
+    "reference_done": 2.202999999979511,
+    "settle_03deg": 2.1399999998975545,
+    "stop_span_deg": 0.08594366926962674,
+    "tail_span_deg": 0.08594366926962674,
+    "final_error_deg": 0.0,
+    "overshoot_deg": 0.08594366926962674,
+    "peak_velocity": 5.9538,
+    "peak_reference_velocity": 5.7707
+  },
+  {
+    "label": "fast6a8d4-zero",
+    "reference_done": 1.406999999890104,
+    "settle_03deg": 1.922000000020489,
+    "stop_span_deg": 1.581363514561072,
+    "tail_span_deg": 0.0,
+    "final_error_deg": 0.0,
+    "overshoot_deg": 1.581363514561072,
+    "peak_velocity": 3.7801,
+    "peak_reference_velocity": 3.6698
+  },
+  {
+    "label": "speedbase-minus2pi",
+    "reference_done": 2.6089999999385327,
+    "settle_03deg": 2.5,
+    "stop_span_deg": 0.17761691649075192,
+    "tail_span_deg": 0.08594366926921963,
+    "final_error_deg": -0.08594366927003386,
+    "overshoot_deg": 0.2635605857607858,
+    "peak_velocity": 4.5604,
+    "peak_reference_velocity": 4.0
+  },
+  {
+    "label": "speedbase-pluspi",
+    "reference_done": 1.796000000089407,
+    "settle_03deg": 1.7809999999590218,
+    "stop_span_deg": 0.17188733853925348,
+    "tail_span_deg": 0.0,
+    "final_error_deg": 0.0,
+    "overshoot_deg": 0.0,
+    "peak_velocity": 3.485,
+    "peak_reference_velocity": 3.5288
+  }
+]

@@ -1,0 +1,42 @@
+[
+  {
+    "magic": 1194603313,
+    "stage": 4,
+    "core_clock": 170000000,
+    "uptime_ms": 78080,
+    "loops": 26037,
+    "enabled": 0,
+    "sleep_high": 1,
+    "off_high": 1,
+    "fault_high": 0,
+    "sensor_valid": 0,
+    "sensor_errors": 26023,
+    "can_psr": 1903,
+    "can_ecr": 65456,
+    "tx_dropped": 0,
+    "angle": 0.0,
+    "velocity": 0.0,
+    "cfsr": 0,
+    "hfsr": 0
+  },
+  {
+    "magic": 1194603313,
+    "stage": 4,
+    "core_clock": 170000000,
+    "uptime_ms": 78386,
+    "loops": 26124,
+    "enabled": 0,
+    "sleep_high": 1,
+    "off_high": 1,
+    "fault_high": 0,
+    "sensor_valid": 0,
+    "sensor_errors": 26125,
+    "can_psr": 1903,
+    "can_ecr": 65456,
+    "tx_dropped": 0,
+    "angle": 0.0,
+    "velocity": 0.0,
+    "cfsr": 0,
+    "hfsr": 0
+  }
+]
