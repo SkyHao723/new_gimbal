@@ -54,6 +54,15 @@ except ImportError:  # pragma: no cover - older websockets
 CMD_ID = 0x201
 REPLY_ID = 0x281
 DEFAULT_BITRATE = 500_000
+NODE = 1
+
+
+def set_node(node: int) -> None:
+    """Select which board this bridge talks to (1..7 -> 0x201..0x207 / 0x281..0x287)."""
+    global CMD_ID, REPLY_ID, NODE
+    NODE = node
+    CMD_ID = 0x200 + node
+    REPLY_ID = 0x280 + node
 # One CAN frame per board main-loop iteration; the firmware queue is 40 deep and
 # the loop also services FOC, so keep a small gap instead of flooding it.
 CMD_GAP_S = 0.035
@@ -215,11 +224,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--channel", type=int, default=0, help="candleLight channel (default 0)")
     parser.add_argument("--bitrate", type=int, default=DEFAULT_BITRATE)
+    parser.add_argument("--node", type=int, default=1,
+                        help="board node id 1..7 (command 0x200+n / reply 0x280+n)")
     parser.add_argument("--ws-port", type=int, default=8765)
     parser.add_argument("--http-port", type=int, default=8766)
     parser.add_argument("--no-http", action="store_true", help="only run the websocket bridge")
     args = parser.parse_args()
 
+    set_node(args.node)
     bus = can.Bus(
         interface="gs_usb",
         channel=args.channel,

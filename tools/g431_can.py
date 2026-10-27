@@ -44,6 +44,19 @@ CMD_ID = 0x201
 REPLY_ID = 0x281
 
 
+def set_node(node):
+    """Pick the CAN IDs of one board.
+
+    node 1..7 -> command 0x201..0x207, reply 0x281..0x287 (default node 1).
+    node 0    -> broadcast command 0x200, no reply expected (use for 'D' all-stop).
+    """
+    global CMD_ID, REPLY_ID
+    if node == 0:
+        CMD_ID, REPLY_ID = 0x200, -1
+    else:
+        CMD_ID, REPLY_ID = 0x200 + node, 0x280 + node
+
+
 def open_bus(bitrate=500000, channel=0):
     return can.Bus(interface="gs_usb", channel=channel, index=channel, bitrate=bitrate)
 
@@ -77,6 +90,8 @@ def main():
     parser = argparse.ArgumentParser(description="G431 gimbal CAN helper")
     parser.add_argument("--bitrate", type=int, default=500000)
     parser.add_argument("--channel", type=int, default=0)
+    parser.add_argument("--node", type=int, default=1,
+                        help="board node id 1..7 (0 = broadcast, no reply expected)")
     sub = parser.add_subparsers(dest="action", required=True)
     sub.add_parser("ping")
     p_cmd = sub.add_parser("cmd")
@@ -85,6 +100,7 @@ def main():
     p_listen.add_argument("seconds", type=float, nargs="?", default=3.0)
     args = parser.parse_args()
 
+    set_node(args.node)
     bus = open_bus(args.bitrate, args.channel)
     try:
         if args.action == "listen":
@@ -93,9 +109,13 @@ def main():
             return
         text = "".join(args.text) if args.action == "cmd" else "?"
         send(bus, text)
+        if REPLY_ID < 0:
+            print(f"(broadcast 0x{CMD_ID:03X} sent: {text!r}; no reply expected)")
+            return
         reply = collect(bus)
         if not reply:
-            print(f"(no reply to {text!r}; is the board powered and the bus "
+            print(f"(no reply to {text!r} from node {args.node} "
+                  f"[cmd 0x{CMD_ID:03X}]; is the board powered and the bus "
                   f"terminated?)")
         else:
             print(reply)

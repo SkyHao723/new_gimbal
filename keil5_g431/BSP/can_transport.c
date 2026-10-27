@@ -19,16 +19,28 @@ static volatile int started;
 static volatile int bus_off;
 static uint32_t restart_at_ms;
 
-static int can_reopen(void)
+/* Two exact-match filters: this node's command ID plus the broadcast ID.
+   Both go to RX FIFO0; can_commands() decides what each one means. */
+static int config_filters(void)
 {
     FDCAN_FilterTypeDef filter = {0};
-    (void)HAL_FDCAN_Stop(&can);
     filter.IdType = FDCAN_STANDARD_ID;
     filter.FilterType = FDCAN_FILTER_MASK;
     filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-    filter.FilterID1 = BOARD_CAN_COMMAND_ID;
     filter.FilterID2 = 0x7ffu;
+    filter.FilterIndex = 0u;
+    filter.FilterID1 = BOARD_CAN_COMMAND_ID;
     if (HAL_FDCAN_ConfigFilter(&can, &filter) != HAL_OK) return 0;
+    filter.FilterIndex = 1u;
+    filter.FilterID1 = BOARD_CAN_BROADCAST_ID;
+    if (HAL_FDCAN_ConfigFilter(&can, &filter) != HAL_OK) return 0;
+    return 1;
+}
+
+static int can_reopen(void)
+{
+    (void)HAL_FDCAN_Stop(&can);
+    if (!config_filters()) return 0;
     if (HAL_FDCAN_ConfigGlobalFilter(&can, FDCAN_REJECT, FDCAN_REJECT,
                                      FDCAN_REJECT_REMOTE,
                                      FDCAN_REJECT_REMOTE) != HAL_OK) return 0;
@@ -45,7 +57,6 @@ int can_transport_init(void)
 {
     GPIO_InitTypeDef gpio = {0};
     RCC_PeriphCLKInitTypeDef clocks = {0};
-    FDCAN_FilterTypeDef filter = {0};
     __HAL_RCC_GPIOB_CLK_ENABLE();
     GPIOB->BSRR = GPIO_PIN_5; /* Standby until FDCAN is configured. */
     gpio.Pin = GPIO_PIN_5;
@@ -78,16 +89,11 @@ int can_transport_init(void)
     can.Init.DataSyncJumpWidth = 1;
     can.Init.DataTimeSeg1 = 1;
     can.Init.DataTimeSeg2 = 1;
-    can.Init.StdFiltersNbr = 1;
+    can.Init.StdFiltersNbr = 2;
     can.Init.ExtFiltersNbr = 0;
     can.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
     if (HAL_FDCAN_Init(&can) != HAL_OK) return 0;
-    filter.IdType = FDCAN_STANDARD_ID;
-    filter.FilterType = FDCAN_FILTER_MASK;
-    filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-    filter.FilterID1 = BOARD_CAN_COMMAND_ID;
-    filter.FilterID2 = 0x7ffu;
-    if (HAL_FDCAN_ConfigFilter(&can, &filter) != HAL_OK) return 0;
+    if (!config_filters()) return 0;
     if (HAL_FDCAN_ConfigGlobalFilter(&can, FDCAN_REJECT, FDCAN_REJECT,
                                     FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE) != HAL_OK) return 0;
     if (HAL_FDCAN_ActivateNotification(&can, FDCAN_IT_RX_FIFO0_NEW_MESSAGE |
