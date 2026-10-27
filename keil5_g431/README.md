@@ -145,6 +145,26 @@ nSLEEP。nFAULT 仅连接 PB2，不宣称已实现 TIM1_BKIN 硬件封波。电�
 - 台架自测宏：`G431_SPIN_TEST` / `G431_ALIGN_TEST` / `G431_CLOSEDLOOP_TEST` / `G431_BENCH_CURRENT_TEST` /
   `G431_CURRENT_LOCK_TEST`，任一为 1 时自动 `G431_BENCH_MODE=1` 并跳过 CAN（否则 bus-off 会持续请求停机）。
   **交付固件必须全部置 0。**
+
+## 抖动根因：AS5600 掉进 100 ms 轮询的低功耗模式（2026-10-27）
+
+详见 [g431-抖动根因-AS5600低功耗.md](../docs/g431-抖动根因-AS5600低功耗.md)。
+
+现象是"转动时有明显抖动、速度上不去、同一套增益有时稳有时不稳"。**不是调参问题，是编码器反馈变成了 10 Hz**：
+
+- 固件侧每秒读 AS5600 401 次，但**原始角度每秒只变化 10.1 次**（`as5600_stats[]` 实测），相邻两次更新
+  最小间隔 97 ms —— 传感器自己在 100 ms 轮询的低功耗模式（CONF `0x07` 的 PMOD=11=LPM3）。
+- 于是 `delta/dt` 的速度估计变成"39 拍为 0、一拍跳 0.13 rad"，低通后是 5 rad/s 级尖刺；
+  速度 PI 把 uq 顶到 2.5 V 饱和 → 10 Hz 极限环 → 用户感到的抖动，同时匀速只能到 ~1.3 rad/s。
+- **只有给传感器断电重启才能退出该状态**：MCU 复位/重烧都不算数（传感器一直被 3.3 V 供电）。
+  断电重启后 CONF 读回 `0x00`，`updates/s` 393~409，抖动从 74.5 mrad 降到 8.8 mrad（8.5 倍）。
+- 固件现在做了两件事：
+  1. `as5600_init()` 写 CONF 把 PMOD 置 00，并在运行中每 1024 次读取重写一遍（实测空闲 150 s 仍保持 394 updates/s）；
+  2. **编码器停滞看门狗**：使能状态下若 `|ramp_target-angle| > 0.05 rad` 且原始角度 120 ms 未变化，
+     立即停机并打印 `FAULT encoder stale (AS5600 low-power mode? power-cycle the sensor)`。
+- SWD 诊断量（`nm` 取地址后 `-r32`）：`as5600_conf_log`（[15:8] 修前 CONF、[7:0] 修后）、
+  `as5600_stats[6]`（更新次数 / 读取次数 / 最后原始值 / 最小间隔 µs / 最大间隔 µs / CONF 回读）。
+
 ## CAN 协议
 
 使用经典 CAN，标准 11 位 ID、500kbit/s，无 BRS。默认请求 ID `0x201`，回复 ID `0x281`，

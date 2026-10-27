@@ -9,6 +9,7 @@
 #include "motor.h"
 #include "motor_config.h"
 #include "diagnostics.h"
+#include <math.h>
 #include <stdio.h>
 
 static Motor motor;
@@ -159,6 +160,8 @@ int main(void)
             if (stop & BOARD_STOP_CAN) printf("FAULT CAN, motor DISABLED\r\n");
             if (stop & BOARD_STOP_CURRENT)
                 printf("FAULT overcurrent pk=%.2fA, motor DISABLED\r\n", (double)limit.peak_a);
+            if (stop & BOARD_STOP_SENSOR)
+                printf("FAULT encoder stale (AS5600 low-power mode? power-cycle the sensor)\r\n");
             printf("EN OFF (stop)\r\n");
         }
 
@@ -189,6 +192,15 @@ int main(void)
                                                     requested_voltage);
 
         motor_step(&motor);
+        /* The AS5600 can wedge itself into its 100 ms polling mode; the angle
+           then only refreshes at 10 Hz and the whole loop would be running on
+           stale feedback (that is what made the motor shake).  The sensor needs
+           a power cycle to leave that state, so refuse to keep driving it. */
+        if (motor.enabled &&
+            (fabsf(motor.ramp_target - motor.angle) > 0.05f) &&
+            (as5600_ms_since_change() > 120u)) {
+            board_request_stop(BOARD_STOP_SENSOR);
+        }
         if (board_get_command(command)) {
             motor_command(&motor, command);
             if (command[0] == '?') {

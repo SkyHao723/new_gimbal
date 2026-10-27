@@ -14,4 +14,7 @@ typedef struct {
 
 void as5600_init(void);
 int as5600_update(Encoder *sensor);
+/* Milliseconds since the raw angle last changed; 0 while no change was seen
+   yet.  Used to catch the sensor dropping into its 100 ms polling mode. */
+uint32_t as5600_ms_since_change(void);
 #endif

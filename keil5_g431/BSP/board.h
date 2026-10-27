@@ -19,6 +19,7 @@ void board_request_stop(unsigned int reason);
 #define BOARD_STOP_DRIVER 2u
 #define BOARD_STOP_CAN 4u
 #define BOARD_STOP_CURRENT 8u
+#define BOARD_STOP_SENSOR 16u
 
 #define BOARD_COMMAND_LENGTH 40
 #endif

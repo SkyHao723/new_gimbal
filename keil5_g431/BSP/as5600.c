@@ -7,8 +7,22 @@
 #define I2C_STRETCH_TIMEOUT_US 250u
 #define AS5600_ADDRESS_WRITE 0x6cu
 #define AS5600_ADDRESS_READ  0x6du
+#define AS5600_CONF_REG       0x07u
+#define AS5600_CONF_PMOD_MASK 0x03u
+#define AS5600_PMOD_REFRESH   1024u
+
+/* Diagnostics for SWD: [15:8] = CONF read before the fix, [7:0] = CONF read
+   back after the fix (0xFF when the write did not stick). */
+volatile uint32_t as5600_conf_log;
+/* [0]=angle updates seen, [1]=reads, [2]=last raw, [3]=min us between updates,
+   [4]=max us between updates, [5]=CONF readback. */
+volatile uint32_t as5600_stats[6];
 
 static int initialized;
+static uint32_t pmod_tick;
+static uint16_t last_raw;
+static uint32_t last_change_us;
+static int have_last;
 
 static void pause_us(uint32_t delay)
 {
@@ -128,6 +142,32 @@ static int read_registers(uint8_t reg, uint8_t *data, unsigned int count)
     return ok;
 }
 
+static int write_register(uint8_t reg, uint8_t value)
+{
+    int ok = i2c_start() &&
+             i2c_write_byte(AS5600_ADDRESS_WRITE) &&
+             i2c_write_byte(reg) &&
+             i2c_write_byte(value);
+    i2c_stop();
+    return ok;
+}
+
+/* The AS5600 watches for magnet movement; when the magnet has not moved for a
+   while it falls back to a low power mode (PMOD = LPM3, 100 ms polling) and the
+   angle registers then only refresh at ~10 Hz.  Reading CONF shows what was
+   programmed, not which state machine is actually running, so the value is
+   re-written unconditionally instead of only when the readback looks wrong. */
+static int force_normal_power_mode(void)
+{
+    uint8_t conf;
+    if (!read_registers(AS5600_CONF_REG, &conf, 1u)) {
+        return 0;
+    }
+    as5600_stats[5] = conf;
+    return write_register(AS5600_CONF_REG,
+                          (uint8_t)(conf & (uint8_t)~AS5600_CONF_PMOD_MASK));
+}
+
 static void recover_bus(void)
 {
     unsigned int i;
@@ -159,11 +199,40 @@ void as5600_init(void)
     initialized = ((BOARD_ENCODER_PORT->IDR &
                     (BOARD_ENCODER_SCL_PIN | BOARD_ENCODER_SDA_PIN)) ==
                    (BOARD_ENCODER_SCL_PIN | BOARD_ENCODER_SDA_PIN));
+    if (initialized) {
+        uint8_t before = 0u;
+        uint8_t after = 0u;
+        int fixed;
+        (void)read_registers(AS5600_CONF_REG, &before, 1u);
+        fixed = force_normal_power_mode();
+        (void)read_registers(AS5600_CONF_REG, &after, 1u);
+        as5600_conf_log = ((uint32_t)before << 8) | (fixed ? after : 0xFFu);
+        pmod_tick = 0u;
+        as5600_stats[0] = 0u;
+        as5600_stats[1] = 0u;
+        as5600_stats[2] = 0u;
+        as5600_stats[3] = 0xFFFFFFFFu;
+        as5600_stats[4] = 0u;
+        as5600_stats[5] = 0u;
+        have_last = 0;
+        last_raw = 0u;
+        last_change_us = 0u;
+    }
+}
+
+uint32_t as5600_ms_since_change(void)
+{
+    if (!have_last) {
+        return 0u;
+    }
+    return (uint32_t)(board_micros() - last_change_us) / 1000u;
 }
 
 int as5600_update(Encoder *sensor)
 {
     uint8_t data[2];
+    uint16_t raw;
+    uint32_t now;
     if (!initialized || !read_registers(0x0cu, data, 2u)) {
         /* Never continue control with a stale angle. */
         board_driver_set(0);
@@ -174,7 +243,29 @@ int as5600_update(Encoder *sensor)
                        (BOARD_ENCODER_SCL_PIN | BOARD_ENCODER_SDA_PIN));
         return 0;
     }
-    encoder_accept_raw(sensor,
-        (uint16_t)(((data[0] & 15u) << 8) | data[1]), board_micros());
+    raw = (uint16_t)(((data[0] & 15u) << 8) | data[1]);
+    now = board_micros();
+    as5600_stats[1]++;
+    if (!have_last || raw != last_raw) {
+        if (have_last) {
+            uint32_t dt = now - last_change_us;
+            if (dt < as5600_stats[3]) {
+                as5600_stats[3] = dt;
+            }
+            if (dt > as5600_stats[4]) {
+                as5600_stats[4] = dt;
+            }
+        }
+        last_raw = raw;
+        last_change_us = now;
+        have_last = 1;
+        as5600_stats[0]++;
+        as5600_stats[2] = raw;
+    }
+    encoder_accept_raw(sensor, raw, now);
+    if (++pmod_tick >= AS5600_PMOD_REFRESH) {
+        pmod_tick = 0u;
+        (void)force_normal_power_mode();
+    }
     return 1;
 }
