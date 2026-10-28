@@ -28,8 +28,11 @@
 #define CALIB_ZERO_ELECTRIC      0.122f
 #define CALIB_SENSOR_DIRECTION   (-1)
 #elif BOARD_CAN_NODE == 3
-/* 2026-10-27 align test: pp=11, dir=+1, zero=0.566 rad (residual 2.4 deg). */
-#define CALIB_ZERO_ELECTRIC      0.566f
+/* 2026-10-28 bidirectional align test on board 3 with motor 3: pp=11, dir=+1,
+   zero = 0.487 rad (rms 3.7 deg, max 7.4 deg; up/down pull hysteresis 5.8 deg).
+   The earlier single-pull run on 2026-10-27 gave 0.566 rad; it is biased by
+   friction, just like board 2 where two single-pull runs differed by 16 deg. */
+#define CALIB_ZERO_ELECTRIC      0.487f
 #define CALIB_SENSOR_DIRECTION   1
 #else
 #define CALIB_ZERO_ELECTRIC      1.697f

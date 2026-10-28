@@ -63,7 +63,7 @@
    1 Hz electrical, 4 s) and leave the bridge off. The travelled angle lands in
    bench_spin_result[] and is read over SWD. Keep 0 for the delivered firmware. */
 /* Bring-up step 2: settle onto three electrical d-axes to derive the zero offset. */
-#define G431_ALIGN_TEST          0
+#define G431_ALIGN_TEST           0
 /* Bring-up step 2b: closed-loop position steps once at start-up. */
 #define G431_CLOSEDLOOP_TEST     0
 #define G431_SPIN_TEST           0
