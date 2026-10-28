@@ -13,7 +13,11 @@
    requiring the derived zero to be identical in all four rows (see
    docs/g431-闭环打通-2026-10-27.md). */
 #if BOARD_CAN_NODE == 1
-#define CALIB_ZERO_ELECTRIC      1.697f
+/* 2026-10-28 bidirectional align test on board 1 with motor 1: pp=11, dir=-1,
+   zero = 1.227 rad (rms 4.7 deg, max 8.1 deg; up/down pull hysteresis 6-8 deg).
+   The 2026-10-27 single-pull value 1.697 rad is friction-biased and was 27 deg
+   off in electrical angle. */
+#define CALIB_ZERO_ELECTRIC      1.227f
 #define CALIB_SENSOR_DIRECTION   (-1)
 #elif BOARD_CAN_NODE == 2
 /* 2026-10-28 align test on board 2 with its own motor: pp=11, dir=-1.
