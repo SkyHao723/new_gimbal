@@ -65,19 +65,22 @@ int bench_spin_run(float amp_v, float elec_rate, uint32_t hold_ms);
 
 /* Zero-electric-angle calibration (step 2 of the bring-up plan). Applies a pure
    d-axis voltage vector at electrical angle theta and lets the rotor settle, so
-   the mechanical angle at that moment defines the zero.
+   the mechanical angle at that moment defines the zero.  Every row does two
+   pulls, swinging the field up from theta - BENCH_ALIGN_SWING and down from
+   theta + BENCH_ALIGN_SWING, so the fit can average the friction hysteresis
+   out (a single pull is only good for a few tens of electrical degrees).
    Each call fills one row of bench_align_result[]:
-     [0] encoder mechanical angle before the lock, radians
-     [1] encoder mechanical angle averaged over the last 200 ms, radians
+     [0] encoder mechanical angle before the pull, radians
+     [1] mechanical angle settled after the swing-up pull, radians
      [2] delta = [1] - [0], radians
      [3] worst |current|, amps
      [4] result code: 0 = settled, -1 = driver would not wake, -2 = enable
-         refused, -3 = aborted early on over-current
+         refused, -3 = aborted early on over-current, -4 = no encoder samples
      [5] nFAULT state after enable (1 = released)
-     [6] number of current samples
+     [6] mechanical angle settled after the swing-down pull, radians
      [7] electrical angle that was commanded, radians
-   Align at theta = 0, pi/2 and pi in turn: the three mechanical deltas give both
-   the sensor direction and a check of the pole-pair count. */
+   Align at theta = 0, 0, pi/2 and pi: the repeated row 0 checks repeatability,
+   and the derived zero has to agree across all four rows. */
 #define BENCH_ALIGN_ROWS 4
 #define BENCH_ALIGN_COLS 8
 extern volatile float bench_align_result[BENCH_ALIGN_ROWS * BENCH_ALIGN_COLS];

@@ -310,16 +310,103 @@ int bench_spin_run(float amp_v, float elec_rate, uint32_t hold_ms)
 
 volatile float bench_align_result[BENCH_ALIGN_ROWS * BENCH_ALIGN_COLS];
 
+/* ---------------------------------------------------------------------------
+ * Zero-electric-angle calibration.
+ *
+ * A d-axis field pulls the rotor flux onto the commanded electrical angle, so
+ * the mechanical angle measured at that moment defines "zero".  Friction makes
+ * the rotor stop short of the target by a hysteresis angle whose sign depends
+ * on the direction the field arrived from, which is why a single pull is only
+ * good for a few tens of electrical degrees.  Every row therefore does two
+ * pulls - one swinging up from theta - BENCH_ALIGN_SWING, one swinging down
+ * from theta + BENCH_ALIGN_SWING - and stores both settled angles, so the
+ * offline fit can average the hysteresis out.
+ * ------------------------------------------------------------------------- */
+
+#define BENCH_ALIGN_SWING    0.9f  /* electrical radians */
+#define BENCH_ALIGN_STEP_MS  10u
+
+static void align_apply(float d_v, float theta)
+{
+    float duty[3];
+
+    foc_svpwm(0.0f, d_v, theta, BENCH_SUPPLY_V, duty);
+    board_pwm(duty[0], duty[1], duty[2]);
+}
+
+/* Returns 1 once the phase current has stayed over the trip for 50 polls. */
+static int align_over(float *worst, int *over)
+{
+    float a0 = current_sense_amp(0);
+    float a1 = current_sense_amp(1);
+    float a2 = current_sense_amp(2);
+    float m = fabsf(a0);
+
+    if (fabsf(a1) > m) m = fabsf(a1);
+    if (fabsf(a2) > m) m = fabsf(a2);
+    if (m > *worst) *worst = m;
+    if (*worst > BENCH_LOCK_TRIP_A) {
+        if (++(*over) > 50) return 1;
+    } else {
+        *over = 0;
+    }
+    return 0;
+}
+
+/* Swing the field from `from` to `theta` over ramp_ms, then hold settle_ms and
+   report the mechanical angle averaged over the last 200 ms of that hold. */
+static int align_pull(float d_v, float from, float theta, uint32_t ramp_ms,
+                      uint32_t settle_ms, float *worst, int *over, float *out)
+{
+    Encoder sensor = {0};
+    uint32_t steps = (ramp_ms + BENCH_ALIGN_STEP_MS - 1u) / BENCH_ALIGN_STEP_MS;
+    float sum = 0.0f;
+    uint32_t samples = 0u;
+    uint32_t start;
+    uint32_t i;
+
+    if (steps == 0u) steps = 1u;
+
+    align_apply(d_v, from);
+    start = board_millis();
+    while ((uint32_t)(board_millis() - start) < 120u) {
+        if (align_over(worst, over)) return -3;
+    }
+    for (i = 1u; i <= steps; ++i) {
+        while ((uint32_t)(board_millis() - start) <
+               (uint32_t)(120u + BENCH_ALIGN_STEP_MS * i)) {
+            if (align_over(worst, over)) return -3;
+        }
+        align_apply(d_v, from + (theta - from) * (float)i / (float)steps);
+    }
+
+    start = board_millis();
+    while ((uint32_t)(board_millis() - start) < settle_ms) {
+        uint32_t elapsed = board_millis() - start;
+        if (align_over(worst, over)) return -3;
+        if ((uint32_t)(elapsed + 200u) >= settle_ms && as5600_update(&sensor)) {
+            sum += sensor.mechanical;
+            ++samples;
+        }
+    }
+    if (samples == 0u) return -4;
+    *out = sum / (float)samples;
+    return 0;
+}
+
 int bench_align_run(int row, float d_v, float theta, uint32_t hold_ms)
 {
     Encoder sensor = {0};
     volatile float *r;
-    float duty[3];
     float worst = 0.0f;
-    float sum = 0.0f;
-    uint32_t settled_samples = 0u, samples = 0u;
-    uint32_t start;
+    float m_up = 0.0f;
+    float m_down = 0.0f;
+    uint32_t ramp_ms = hold_ms / 4u;
+    uint32_t settle_ms = hold_ms / 2u;
     int over = 0;
+    int code;
+    int ok;
+    int try;
     int i;
 
     if (row < 0 || row >= BENCH_ALIGN_ROWS) return -2;
@@ -337,51 +424,46 @@ int bench_align_run(int row, float d_v, float theta, uint32_t hold_ms)
     }
     if (!board_driver_wake()) return -1;
 
-    foc_svpwm(0.0f, d_v, theta, BENCH_SUPPLY_V, duty);
-    board_pwm(duty[0], duty[1], duty[2]);
     current_sense_arm(1);
-    if (!board_driver_set(1)) {
+    /* Stopping the driver at the end of the previous row pulls nSLEEP low, so
+       the DRV latches a (harmless) nFAULT falling edge that races with the next
+       enable through EXTI2. Retry the enable a few times instead of giving up:
+       the flag is cleared and the latch pulsed away on every attempt. */
+    ok = 0;
+    for (try = 0; try < 5 && !ok; ++try) {
+        board_take_stop();
+        ok = board_driver_set(1);
+        if (!ok) HAL_Delay(20u);
+    }
+    if (!ok) {
         board_pwm(0.5f, 0.5f, 0.5f);
         current_sense_arm(0);
         r[4] = -2.0f;
         return -2;
     }
     r[5] = (float)((GPIOB->IDR & DRIVER_FAULT_PIN) ? 1u : 0u);
+    if (ramp_ms < 200u) ramp_ms = 200u;
+    if (settle_ms < 400u) settle_ms = 400u;
 
-    start = board_millis();
-    while ((uint32_t)(board_millis() - start) < hold_ms && over <= 50) {
-        uint32_t elapsed = board_millis() - start;
-        float a0 = current_sense_amp(0);
-        float a1 = current_sense_amp(1);
-        float a2 = current_sense_amp(2);
-        float m = a0 < 0.0f ? -a0 : a0;
-        if ((a1 < 0.0f ? -a1 : a1) > m) m = a1 < 0.0f ? -a1 : a1;
-        if ((a2 < 0.0f ? -a2 : a2) > m) m = a2 < 0.0f ? -a2 : a2;
-        if (m > worst) worst = m;
-        if (worst > BENCH_LOCK_TRIP_A) {
-            ++over;
-        } else {
-            over = 0;
-        }
-        ++samples;
-        /* Average the last 200 ms only: the rotor needs time to settle. */
-        if (elapsed + 200u >= hold_ms && as5600_update(&sensor)) {
-            sum += sensor.mechanical;
-            ++settled_samples;
-        }
-        r[3] = worst;
-        r[6] = (float)samples;
+    code = align_pull(d_v, theta - BENCH_ALIGN_SWING, theta, ramp_ms, settle_ms,
+                      &worst, &over, &m_up);
+    if (code == 0) {
+        code = align_pull(d_v, theta + BENCH_ALIGN_SWING, theta, ramp_ms,
+                          settle_ms, &worst, &over, &m_down);
     }
-    if (over > 50) r[4] = -3.0f;
 
     board_pwm(0.5f, 0.5f, 0.5f);
     board_driver_set(0);
     current_sense_arm(0);
-    if (as5600_update(&sensor) && settled_samples) r[1] = sum / (float)settled_samples;
-    r[2] = r[1] - r[0];
-    if (r[4] == -1.0f) r[4] = 0.0f;
+    r[3] = worst;
+    r[4] = (float)code;
+    if (code == 0) {
+        r[1] = m_up;
+        r[2] = m_up - r[0];
+        r[6] = m_down;
+    }
     board_take_stop();
-    return (int)r[4];
+    return code;
 }
 
 volatile float bench_cl_result[BENCH_CL_ROWS * BENCH_CL_COLS];
