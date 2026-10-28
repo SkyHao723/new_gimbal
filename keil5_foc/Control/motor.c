@@ -215,8 +215,11 @@ void motor_command(Motor *motor, const char *command)
         printf("mode=%s\r\n", motor->direct_mode ? "DIRECT" : "SMOOTH");
         break;
     case 'R':
-        printf("sensor angle=%.4f  vel=%.4f  mech=%.4f\r\n",
-               (double)motor->sensor.angle, (double)motor->sensor.velocity, (double)motor->sensor.mechanical);
+        /* 与 '?' 同一坐标系（已乘 MOTOR_SENSOR_DIRECTION）；mech 仍是传感器原始单圈角。
+           历史遗留：这里曾打印 sensor.angle，dir=-1 的板会与 '?' 反号，host 工具对不上目标值。 */
+        printf("sensor angle=%.4f  vel=%.4f  mech=%.4f  dir=%d\r\n",
+               (double)motor->angle, (double)motor->velocity,
+               (double)motor->sensor.mechanical, (int)MOTOR_SENSOR_DIRECTION);
         break;
     case '?': motor_status(motor); break;
     case 'H': printf("E D T<n> V<n> L<n> M<0|1> R ?\r\n"); break;
