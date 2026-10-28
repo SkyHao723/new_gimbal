@@ -71,7 +71,7 @@ CMD_GAP_S = 0.035
 PAGE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_controller")
 INJECT_TEMPLATE = '<script>window.__G431_BRIDGE__={ws:"ws://127.0.0.1:%d"};</script>'
 
-SINGLE_BYTE = "ED?RH"
+SINGLE_BYTE = "ED?RHX"
 VALUE_OPS = "TVL"
 
 

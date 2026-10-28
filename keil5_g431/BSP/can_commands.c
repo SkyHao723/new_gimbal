@@ -15,7 +15,7 @@ unsigned int can_commands_receive(CanCommands *s, const uint8_t *data, size_t co
     }
     command.opcode = data[0];
     switch (command.opcode) {
-    case 'E': case '?': case 'R': case 'H':
+    case 'E': case '?': case 'R': case 'H': case 'X':
         if (count != 1u) return BOARD_STOP_CAN;
         break;
     case 'T': case 'V': case 'L':

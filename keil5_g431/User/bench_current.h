@@ -105,6 +105,16 @@ int bench_align_run(int row, float d_v, float theta, uint32_t hold_ms);
 extern volatile float bench_cl_result[BENCH_CL_ROWS * BENCH_CL_COLS];
 extern volatile float bench_cl_summary[8];
 
+/* Position-dependent jitter trace: sweep across mechanical angle pi and store
+   one row per control step as (angle, velocity, uq). Decode over SWD.
+   meta = [0] code [1] n [2] vlim [3] start_angle [4] pi_target
+          [5] worst current [6] trips [7] duration s */
+#define BENCH_TRACE_N 1200
+#define BENCH_TRACE_COLS 3
+extern volatile float bench_trace[BENCH_TRACE_N * BENCH_TRACE_COLS];
+extern volatile float bench_trace_meta[8];
+int bench_trace_run(Motor *motor, float v_limit, uint32_t settle_ms, uint32_t cap_ms);
+
 /* Voltage-ceiling sweep (bring-up step 3): one summary row per ceiling so a
    single boot can compare several limits. Uses the same layout as
    bench_cl_summary[]. */

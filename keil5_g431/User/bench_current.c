@@ -566,3 +566,118 @@ void bench_cl_save(int slot)
         row[i] = bench_cl_summary[i];
     }
 }
+
+/* ---------------------------------------------------------------------------
+ * 位置相关抖动的取证：扫过机械角 pi 时按 1 拍 1 行抓 (angle, velocity, uq)。
+ * 用法：G431_TRACE_TEST=1 -> 烧录 -> 等 ~10s -> SWD 读 bench_trace_meta 和
+ *       bench_trace，抖动会表现为 velocity 在某个 mech 角附近反复过零。
+ * ------------------------------------------------------------------------- */
+volatile float bench_trace[BENCH_TRACE_N * BENCH_TRACE_COLS];
+volatile float bench_trace_meta[8];
+
+int bench_trace_run(Motor *motor, float v_limit, uint32_t settle_ms, uint32_t cap_ms)
+{
+    const float two_pi = 6.28318530718f;
+    char command[24];
+    float a0, turns, pi_target, from, worst = 0.0f;
+    uint32_t start_us;
+    int n = 0;
+    int tries;
+    int i;
+
+    for (i = 0; i < BENCH_TRACE_N * BENCH_TRACE_COLS; ++i) {
+        bench_trace[i] = 0.0f;
+    }
+    for (i = 0; i < 8; ++i) {
+        bench_trace_meta[i] = 0.0f;
+    }
+    bench_trace_meta[2] = v_limit;
+
+    board_take_stop();
+    board_pwm(0.5f, 0.5f, 0.5f);
+    (void)board_driver_wake();
+    current_sense_arm(1);
+    if (!board_driver_set(1)) {
+        board_take_stop();
+        bench_trace_meta[0] = -2.0f;
+        return -2;
+    }
+    for (tries = 0; tries < 5 && !motor->enabled; ++tries) {
+        board_take_stop();
+        (void)motor_command(motor, "E");
+        if (!motor->enabled) {
+            HAL_Delay(60u);
+        }
+    }
+    if (!motor->enabled) {
+        board_driver_set(0);
+        current_sense_arm(0);
+        bench_trace_meta[0] = -1.0f;
+        return -1;
+    }
+
+    motor->voltage_limit = v_limit;
+    if (cl_service(motor, v_limit, settle_ms, &worst) != 0) {
+        motor_command(motor, "D");
+        board_take_stop();
+        current_sense_arm(0);
+        bench_trace_meta[0] = -3.0f;
+        return -3;
+    }
+
+    /* 找当前角之后的下一个“机械角 pi”位置，从它前面 1.0 rad 扫过去 */
+    a0 = motor->angle;
+    turns = floorf(a0 / two_pi);
+    pi_target = (turns + 1.0f) * two_pi + 3.14159265359f;
+    if ((pi_target - a0) < 0.8f) {
+        pi_target += two_pi;
+    }
+    from = pi_target - 1.0f;
+
+    snprintf(command, sizeof(command), "T%.5f", (double)from);
+    (void)motor_command(motor, command);
+    start_us = board_micros();
+    while ((uint32_t)(board_micros() - start_us) < 3000000u) {
+        motor->voltage_limit = v_limit;
+        motor_step(motor);
+        if (!motor->enabled) {
+            break;
+        }
+        if (fabsf(motor->angle - from) < 0.03f) {
+            break;
+        }
+    }
+
+    snprintf(command, sizeof(command), "T%.5f", (double)(pi_target + 1.0f));
+    (void)motor_command(motor, command);
+
+    start_us = board_micros();
+    while (n < BENCH_TRACE_N) {
+        motor->voltage_limit = v_limit;
+        motor_step(motor);
+        if (!motor->enabled) {
+            break;
+        }
+        bench_trace[n * BENCH_TRACE_COLS + 0] = motor->angle;
+        bench_trace[n * BENCH_TRACE_COLS + 1] = motor->velocity;
+        bench_trace[n * BENCH_TRACE_COLS + 2] = motor->pi.output_prev;
+        ++n;
+        if ((uint32_t)(board_micros() - start_us) > (cap_ms * 1000u)) {
+            break;
+        }
+    }
+
+    bench_trace_meta[0] = 0.0f;
+    bench_trace_meta[1] = (float)n;
+    bench_trace_meta[3] = a0;
+    bench_trace_meta[4] = pi_target;
+    bench_trace_meta[5] = worst;
+    bench_trace_meta[6] = (float)current_sense_trips();
+    bench_trace_meta[7] = (float)((uint32_t)(board_micros() - start_us)) * 1e-6f;
+
+    (void)motor_command(motor, "D");
+    board_take_stop();
+    current_sense_arm(0);
+    return 0;
+}
+

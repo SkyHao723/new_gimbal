@@ -265,6 +265,7 @@
     <div class="row">
       <button id="btnReadEncoder">读编码器 (R)</button>
       <button id="btnQuickStatus">查询状态 (?)</button>
+      <button id="btnTrace" title="让固件把接下来约 3 秒的角度/速度/uq 存进 RAM，事后可由 SWD 读出">抓抖动波形 (X)</button>
     </div>
   </div>
 
@@ -414,7 +415,7 @@ function setConn(on) {
   $('btnDisconnect').disabled = !on;
   const dis = !on;
   ['btnEnable','btnDisable','btnQuery','btnSendTarget','btnTargetZero',
-   'btnSetVlim','btnSetVellim','btnReadEncoder','btnQuickStatus',
+   'btnSetVlim','btnSetVellim','btnReadEncoder','btnQuickStatus','btnTrace',
    'targetAngle','vlim','vellim'].forEach(id => { if($(id)) $(id).disabled = dis; });
   $('btnTargetCur').disabled = dis || !haveAngle;
   document.querySelectorAll('[data-tgt],[data-step],[data-vlim],[data-vel]').forEach(b => b.disabled = dis);
@@ -802,6 +803,13 @@ $('btnEnable').onclick = async () => {
   }
 };
 $('btnDisable').onclick = () => send('D');
+
+/* 抓抖动波形：让固件把接下来约 3 秒（1200 个控制周期）的角度/速度/uq 存进 RAM。
+   事后用 ST-Link 读 bench_trace / bench_trace_meta 即可分析。 */
+$('btnTrace').onclick = async () => {
+  await send('X');
+  log('[提示] 已开始抓波形，请让抖动持续 2~3 秒，然后告诉我');
+};
 
 /* 目标角度 */
 $('btnSendTarget').onclick = () => {

@@ -34,8 +34,8 @@
 #define MOTOR_VELOCITY_P          0.6f
 #define MOTOR_VELOCITY_I          5.0f
 #define MOTOR_VOLTAGE_RAMP        1000.0f
-#define MOTOR_VELOCITY_FILTER_TF  0.02f
-#define MOTOR_ANGLE_P             40.0f
+#define MOTOR_VELOCITY_FILTER_TF 0.02f
+#define MOTOR_ANGLE_P 25.0f
 #define MOTOR_TARGET_SLEW         20.0f /* [rad/s] 轨迹巡航上限；L 命令实际受它限制 */
 #define MOTOR_TARGET_ACCEL        8.0f  /* rad/s^2; 0 -> 6 rad/s in 0.75s */
 #define MOTOR_TARGET_DECEL        4.0f  /* retain the validated gentle braking */
@@ -68,9 +68,12 @@
 #define G431_CLOSEDLOOP_TEST     0
 #define G431_SPIN_TEST           0
 
+/* 位置相关抖动取证：扫过机械角 pi 抓 400Hz 波形 */
+#define G431_TRACE_TEST          0
+
 /* Any bench self-test implies no CAN adapter is present: main() then skips
    can_transport_init() so a bus-off cannot request a motor stop mid-test. */
-#if (G431_BENCH_CURRENT_TEST + G431_CURRENT_LOCK_TEST + G431_ALIGN_TEST + G431_CLOSEDLOOP_TEST + G431_SPIN_TEST) > 0
+#if (G431_BENCH_CURRENT_TEST + G431_CURRENT_LOCK_TEST + G431_ALIGN_TEST + G431_CLOSEDLOOP_TEST + G431_SPIN_TEST + G431_TRACE_TEST) > 0
 #define G431_BENCH_MODE 1
 #else
 #define G431_BENCH_MODE 0

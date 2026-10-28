@@ -17,6 +17,16 @@ static CurrentLimit limit;
 volatile G431Diagnostics g431_diagnostics;
 static uint32_t demand_start_ms; /* first millisecond of an unsatisfied move */
 
+/* Black box: 'X' arms a 1200-row trace of (angle, velocity, uq) sampled once
+   per control step, so a jitter episode can be captured while the operator
+   drives the motor over CAN and then read out over SWD. */
+static volatile uint8_t trace_armed;
+static volatile int trace_n;
+static uint32_t trace_start_us;
+static float trace_prev_vel;
+static uint16_t trace_flips;
+static volatile uint8_t trace_lockout; /* one-shot: stop after the first capture */
+
 static void publish_current_diagnostics(void)
 {
     g431_diagnostics.cs_valid = (uint32_t)current_sense_valid();
@@ -132,6 +142,14 @@ int main(void)
            (double)bench_spin_result[4], (double)bench_spin_result[10],
            (double)bench_spin_result[3]);
 #endif
+#if G431_TRACE_TEST
+    /* 位置相关抖动取证：先退到 pi-1.0，再扫到 pi+1.0，全程 1 拍 1 行存
+       bench_trace[]，之后用 SWD 读出来分析。 */
+    (void)bench_trace_run(&motor, 2.5f, 800u, 3000u);
+    printf("trace test: code=%.0f n=%.0f duration=%.2fs worst=%.3fA\r\n",
+           (double)bench_trace_meta[0], (double)bench_trace_meta[1],
+           (double)bench_trace_meta[7], (double)bench_trace_meta[5]);
+#endif
 #if G431_CURRENT_LOCK_TEST
     /* One-shot gain calibration: repeatedly hold A-B at 0.6 V for 30 s with a
        20 s quiet gap, so a multimeter can be clipped on at any time. Read
@@ -193,6 +211,45 @@ int main(void)
                                                     requested_voltage);
 
         motor_step(&motor);
+        /* Auto black box: a real high-frequency oscillation makes the velocity
+           estimate flip sign on several consecutive steps with a sizeable
+           amplitude, which normal motion never does.  One-shot capture so an
+           episode can be recorded while the operator drives over CAN and then
+           read out over SWD. */
+        if (!trace_armed && !trace_lockout && motor.enabled) {
+            float v = motor.velocity;
+            if ((trace_prev_vel * v < 0.0f) && (fabsf(v) > 0.3f) &&
+                (fabsf(trace_prev_vel) > 0.3f)) {
+                ++trace_flips;
+            } else if (fabsf(v) < 0.2f) {
+                trace_flips = 0u;
+            }
+            if (trace_flips >= 8u) {
+                trace_n = 0;
+                trace_start_us = board_micros();
+                bench_trace_meta[0] = 3.0f; /* 3 = captured by auto trigger */
+                bench_trace_meta[3] = motor.angle;
+                trace_armed = 1u;
+                trace_flips = 0u;
+                printf("TRACE AUTO ARMED\r\n");
+            }
+            trace_prev_vel = v;
+        }
+        if (trace_armed) {
+            bench_trace[trace_n * BENCH_TRACE_COLS + 0] = motor.angle;
+            bench_trace[trace_n * BENCH_TRACE_COLS + 1] = motor.velocity;
+            bench_trace[trace_n * BENCH_TRACE_COLS + 2] = motor.pi.output_prev;
+            ++trace_n;
+            if (trace_n >= BENCH_TRACE_N) {
+                trace_armed = 0;
+                trace_lockout = 1u;
+                bench_trace_meta[0] = (bench_trace_meta[0] >= 3.0f) ? 4.0f : 2.0f;
+                bench_trace_meta[1] = (float)trace_n;
+                bench_trace_meta[6] = (float)current_sense_trips();
+                bench_trace_meta[7] = (float)(uint32_t)(board_micros() - trace_start_us) * 1e-6f;
+                printf("TRACE DONE n=%d\r\n", trace_n);
+            }
+        }
         /* The AS5600 can wedge itself into its 100 ms polling mode; the angle
            then only refreshes at 10 Hz and the whole loop would be running on
            stale feedback (that is what made the motor shake).  The sensor needs
@@ -211,7 +268,19 @@ int main(void)
             demand_start_ms = 0u;
         }
         if (board_get_command(command)) {
-            motor_command(&motor, command);
+            if (command[0] == 'X' && command[1] == '\0') {
+                trace_n = 0;
+                trace_start_us = board_micros();
+                bench_trace_meta[0] = 1.0f; /* 1 = armed by hand */
+                bench_trace_meta[2] = requested_voltage;
+                bench_trace_meta[3] = motor.angle;
+                trace_flips = 0u;
+                trace_lockout = 0u;
+                trace_armed = 1u;
+                printf("TRACE ARMED (%d rows)\r\n", BENCH_TRACE_N);
+            } else {
+                motor_command(&motor, command);
+            }
             if (command[0] == '?') {
                 printf("CAN txdrop=%lu nFAULT=%u\r\n", can_transport_dropped_bytes(),
                        (GPIOB->IDR & DRIVER_FAULT_PIN) ? 1u : 0u);
