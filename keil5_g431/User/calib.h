@@ -16,7 +16,16 @@
 #define CALIB_ZERO_ELECTRIC      1.697f
 #define CALIB_SENSOR_DIRECTION   (-1)
 #elif BOARD_CAN_NODE == 2
-#define CALIB_ZERO_ELECTRIC      1.697f /* TODO: board 2 power stage not driving yet */
+/* 2026-10-28: board 3's motor + magnet ring is temporarily bolted to board 2
+   while the board 2 power stage is being repaired, so it inherits board 3's
+   calibration. Re-measure with G431_ALIGN_TEST once board 2 gets its own motor
+   back.
+   Re-measured on board 2 with that motor on 2026-10-28: the phase order on this
+   board is opposite to board 3 (it needs dir = -1), and with board 3's dir = +1
+   the drive vector landed on the rotor flux axis: 1.07 A flowed while the rotor
+   did not move at all. Fit of the four align rows: pp=11, dir=-1,
+   zero=0.274 rad (max deviation 9.7 deg). */
+#define CALIB_ZERO_ELECTRIC      0.274f
 #define CALIB_SENSOR_DIRECTION   (-1)
 #elif BOARD_CAN_NODE == 3
 /* 2026-10-27 align test: pp=11, dir=+1, zero=0.566 rad (residual 2.4 deg). */

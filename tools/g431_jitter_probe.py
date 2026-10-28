@@ -56,6 +56,13 @@ usb.core.find = _find_with_backend
 
 CMD_ID = 0x201
 REPLY_ID = 0x281
+
+
+def set_node(node: int) -> None:
+    """Point the probe at one board on the shared bus (1..7)."""
+    global CMD_ID, REPLY_ID
+    CMD_ID = 0x200 + node
+    REPLY_ID = 0x280 + node
 SINGLE_BYTE = "ED?RH"
 VALUE_OPS = "TVL"
 
@@ -316,9 +323,12 @@ def main(argv=None) -> int:
     ap.add_argument("--settle-band", type=float, default=0.01,
                     help="step: |err| band that counts as settled (default 0.01 rad)")
     ap.add_argument("--repeat", type=int, default=1)
+    ap.add_argument("--node", type=int, default=1,
+                    help="CAN node id of the target board (1..7)")
     ap.add_argument("--tag", default="")
     ap.add_argument("--csv", default=None)
     args = ap.parse_args(argv)
+    set_node(args.node)
     if args.mode == "step" and args.seconds == 6.0:
         args.seconds = 4.0
 

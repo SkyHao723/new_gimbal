@@ -15,6 +15,7 @@
 static Motor motor;
 static CurrentLimit limit;
 volatile G431Diagnostics g431_diagnostics;
+static uint32_t demand_start_ms; /* first millisecond of an unsatisfied move */
 
 static void publish_current_diagnostics(void)
 {
@@ -195,11 +196,19 @@ int main(void)
         /* The AS5600 can wedge itself into its 100 ms polling mode; the angle
            then only refreshes at 10 Hz and the whole loop would be running on
            stale feedback (that is what made the motor shake).  The sensor needs
-           a power cycle to leave that state, so refuse to keep driving it. */
-        if (motor.enabled &&
-            (fabsf(motor.ramp_target - motor.angle) > 0.05f) &&
-            (as5600_ms_since_change() > 120u)) {
-            board_request_stop(BOARD_STOP_SENSOR);
+           a power cycle to leave that state, so refuse to keep driving it.
+           Only count time from the moment torque is actually demanded: a rotor
+           that sat still for minutes would otherwise trip on the first move. */
+        if (motor.enabled && (fabsf(motor.ramp_target - motor.angle) > 0.05f)) {
+            if (demand_start_ms == 0u) {
+                demand_start_ms = board_millis();
+            } else if (((uint32_t)(board_millis() - demand_start_ms) > 200u) &&
+                       (as5600_ms_since_change() > 200u)) {
+                board_request_stop(BOARD_STOP_SENSOR);
+                demand_start_ms = 0u;
+            }
+        } else {
+            demand_start_ms = 0u;
         }
         if (board_get_command(command)) {
             motor_command(&motor, command);
