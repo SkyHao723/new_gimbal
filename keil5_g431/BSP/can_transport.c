@@ -198,7 +198,11 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *handle, uint32_t flags)
             break;
         }
         length = header.DataLength;
-        if (header.Identifier != BOARD_CAN_COMMAND_ID || header.IdType != FDCAN_STANDARD_ID ||
+        /* Accept this node's own command ID and the shared broadcast ID; the
+         * filters already limit us to exactly those two. */
+        if ((header.Identifier != BOARD_CAN_COMMAND_ID &&
+             header.Identifier != BOARD_CAN_BROADCAST_ID) ||
+            header.IdType != FDCAN_STANDARD_ID ||
             header.RxFrameType != FDCAN_DATA_FRAME) continue;
         if (header.FDFormat != FDCAN_CLASSIC_CAN || length > 8u) {
             board_request_stop(BOARD_STOP_CAN);
