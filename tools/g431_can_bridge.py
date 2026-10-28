@@ -72,7 +72,7 @@ PAGE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_contro
 INJECT_TEMPLATE = '<script>window.__G431_BRIDGE__={ws:"ws://127.0.0.1:%d"};</script>'
 
 SINGLE_BYTE = "ED?RHX"
-VALUE_OPS = "TVL"
+VALUE_OPS = "TVLM"
 
 
 def encode_command(text: str) -> bytes:

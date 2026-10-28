@@ -104,8 +104,17 @@ void motor_step(Motor *motor)
         apply_voltage(motor->voltage_limit, motor->openloop_angle*MOTOR_POLE_PAIRS);
         return;
     }
-    trajectory_step(&motor->path, dt);
-    motor->ramp_target = motor->path.position;
+    if (motor->direct_mode) {
+        /* Direct mode: no trajectory. The position loop alone pulls the shaft
+           to the target at full available torque -- crisp, no soft start/stop.
+           `path` is kept parked on the target so switching back is clean. */
+        motor->ramp_target = motor->target;
+        motor->path.position = motor->target;
+        motor->path.velocity = 0.0f;
+    } else {
+        trajectory_step(&motor->path, dt);
+        motor->ramp_target = motor->path.position;
+    }
     /* Reference velocity feedforward avoids building a large following error
        just to make the motor follow a moving target. At rest it is zero. */
     velocity_sp = foc_clamp(motor->path.velocity + MOTOR_ANGLE_P*(motor->ramp_target-motor->angle),
@@ -118,12 +127,12 @@ void motor_step(Motor *motor)
 void motor_status(const Motor *motor)
 {
     /* Keep the existing Web Serial parser's field names and EN format. */
-    printf("EN=%s  angle=%.4f  vel=%.4f  tgt=%.4f  Vlim=%.2f  Vbus=%.1f  dir=%d  pp=FIXED  zero=%.4f  ref=%.4f  rv=%.4f  uq=%.3f  ui=%.3f\r\n",
+    printf("EN=%s  angle=%.4f  vel=%.4f  tgt=%.4f  Vlim=%.2f  Vbus=%.1f  dir=%d  pp=FIXED  zero=%.4f  ref=%.4f  rv=%.4f  uq=%.3f  ui=%.3f  mode=%s\r\n",
            motor->enabled ? "ON" : "OFF", (double)motor->angle, (double)motor->velocity,
            (double)motor->target, (double)motor->voltage_limit, (double)MOTOR_SUPPLY_VOLTAGE,
            MOTOR_SENSOR_DIRECTION, (double)MOTOR_ZERO_ELECTRIC, (double)motor->ramp_target,
            (double)motor->path.velocity, (double)(motor->startup ? motor->voltage_limit : motor->pi.output_prev),
-           (double)motor->pi.integral);
+           (double)motor->pi.integral, motor->direct_mode ? "DIRECT" : "SMOOTH");
 }
 
 static int read_number(const char *text, float *value)
@@ -167,8 +176,9 @@ void motor_command(Motor *motor, const char *command)
             printf("startup rotate ABORTED by target command\r\n");
         }
         motor->target = value;
-        trajectory_plan(&motor->path, value, fminf(MOTOR_TARGET_SLEW, motor->velocity_limit),
-                        MOTOR_TARGET_ACCEL, MOTOR_TARGET_DECEL);
+        if (!motor->direct_mode)
+            trajectory_plan(&motor->path, value, fminf(MOTOR_TARGET_SLEW, motor->velocity_limit),
+                            MOTOR_TARGET_ACCEL, MOTOR_TARGET_DECEL);
         printf("target=%.4f\r\n", (double)value);
         break;
     case 'V':
@@ -184,17 +194,32 @@ void motor_command(Motor *motor, const char *command)
             break;
         }
         motor->velocity_limit = value;
-        if (!motor->startup)
+        if (!motor->startup && !motor->direct_mode)
             trajectory_plan(&motor->path, motor->target, fminf(MOTOR_TARGET_SLEW, value),
                             MOTOR_TARGET_ACCEL, MOTOR_TARGET_DECEL);
         printf("Vellim=%.2f\r\n", (double)value);
+        break;
+    case 'M':
+        if (!read_number(command+1, &value)) break;
+        motor->direct_mode = (value != 0.0f) ? 1u : 0u;
+        if (motor->direct_mode) {
+            /* Park the (unused) trajectory on the target so a later switch
+               back to smooth mode starts from rest at the current target. */
+            motor->path.position = motor->target;
+            motor->path.velocity = 0.0f;
+        } else if (!motor->startup) {
+            trajectory_reset(&motor->path, motor->angle);
+            trajectory_plan(&motor->path, motor->target, fminf(MOTOR_TARGET_SLEW, motor->velocity_limit),
+                            MOTOR_TARGET_ACCEL, MOTOR_TARGET_DECEL);
+        }
+        printf("mode=%s\r\n", motor->direct_mode ? "DIRECT" : "SMOOTH");
         break;
     case 'R':
         printf("sensor angle=%.4f  vel=%.4f  mech=%.4f\r\n",
                (double)motor->sensor.angle, (double)motor->sensor.velocity, (double)motor->sensor.mechanical);
         break;
     case '?': motor_status(motor); break;
-    case 'H': printf("E D T<n> V<n> L<n> R ?\r\n"); break;
+    case 'H': printf("E D T<n> V<n> L<n> M<0|1> R ?\r\n"); break;
     default: printf("? for help\r\n"); break;
     }
 }

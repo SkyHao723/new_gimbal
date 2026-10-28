@@ -1,6 +1,13 @@
 #ifndef CALIB_H
 #define CALIB_H
 
+/* Host unit tests compile the shared control code without any STM32 headers,
+   so the board/node macros are not available there: fall back to neutral
+   values instead of pulling in board_config.h (which includes the HAL). */
+#if defined(G431_HOST_TEST)
+#define CALIB_ZERO_ELECTRIC      0.0f
+#define CALIB_SENSOR_DIRECTION   1
+#else
 #include "board_config.h"
 
 /* Per-board calibration of the motor that is bolted to that board.
@@ -42,5 +49,6 @@
 #define CALIB_ZERO_ELECTRIC      1.697f
 #define CALIB_SENSOR_DIRECTION   (-1)
 #endif
+#endif /* G431_HOST_TEST */
 
 #endif

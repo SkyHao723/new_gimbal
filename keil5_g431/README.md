@@ -220,6 +220,35 @@ nSLEEP。nFAULT 仅连接 PB2，不宣称已实现 TIM1_BKIN 硬件封波。电�
     `trace_osc.py`（黑匣子统计：分块 pp / 频率 / uq 饱和率）、`hold_accuracy.py`（阶跃误差）、
     `soak_node.py`（往复热加载）。
 
+## 两种运动模式：缓动 M0 / 直驱 M1（2026-10-28）
+
+`T` 命令只是"目标在哪里"，**怎么走过去**由运动模式决定（`M0`/`M1`，掉电默认 M0）：
+
+- **缓动 M0**（默认）：`trajectory_plan()` 生成 S 曲线，速度受 `MOTOR_TARGET_SLEW`
+  （20 rad/s）、加速度受 `MOTOR_TARGET_ACCEL`（8）、减速度 `MOTOR_TARGET_DECEL`（4）限制，
+  起停柔和、没有冲击。适合转大角度、演示、怕听到"砰"声的场合。
+- **直驱 M1**：不做轨迹规划，`ramp_target` 直接等于 `target`，位置环
+  `velocity_sp = clamp(MOTOR_ANGLE_P*(target-angle), ±velocity_limit)` 一步到位，
+  到位速度快、干脆，但有冲击，大角度会瞬时拉到大电流。
+
+实测（node3，3 号电机，Vlim 4 V，settle 判据 |err|<0.01 rad）：
+
+| 位移 | 缓动 M0 | 直驱 M1 | M0 峰值电流 | M1 峰值电流 |
+|---|---|---|---|---|
+| 1 rad | 0.83~0.85 s | **0.20~0.61 s** | 0.1 A 级 | 0.5~1.0 A 级 |
+| 3 rad | 1.45~1.54 s | **0.57~0.68 s** | 0.17 A | **1.77~1.92 A** |
+
+注意 3 rad 直驱时峰值电流 1.9 A **已经超过 1.6 A 折叠阈值**，限流器会把 `allowed` 压下去
+（这正是它该做的），所以直驱不是"更大扭矩"，只是"不给轨迹留缓冲"。云台瞄准这类
+"小角度、要快"的场景用 M1，大幅度移动仍建议 M0。
+
+实现位置：`keil5_foc/Control/motor.c` 的 `motor_step()`（`direct_mode` 分支）与
+`motor_command()` 的 `M` 分支；`Motor.direct_mode` 字段默认 0，F103 工程不设置它，
+行为与以前完全一致（`keil5_foc/Tests/test_control.c` 新增 `test_smooth_direct_mode()`
+覆盖：M 命令解析、ramp 旁路、轨迹停靠、切回 M0 恢复规划、非法参数不改模式）。
+
+网页上在「速度上限」下面有两个按钮「缓动 M0 / 直驱 M1」，状态栏会显示 `mode=SMOOTH|DIRECT`。
+
 ## CAN 协议
 
 使用经典 CAN，标准 11 位 ID、500kbit/s，无 BRS。位时序：42.5MHz /5，
@@ -259,6 +288,7 @@ powershell -ExecutionPolicy Bypass -File build\g431_build_nodes.ps1
 | Tπ | `54 DB 0F 49 40`，DLC=5 | 绝对机械角 π rad |
 | V3 | `56 00 00 40 40`，DLC=5 | 电压上限 3V |
 | L20 | `4C 00 00 A0 41`，DLC=5 | 速度上限 20rad/s（轨迹巡航也放到 20，见上文转速上限） |
+| M1 | `4D 00 00 80 3F`，DLC=5 | 运动模式：0=缓动（轨迹规划，默认）1=直驱（不做规划，位置环直接拉到位） |
 | ? | `3F`，DLC=1 | 查询状态 |
 | R / H | `52` / `48`，各 DLC=1 | 编码器 / 帮助 |
 

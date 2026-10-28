@@ -5,6 +5,7 @@ $sharedRoot = Join-Path (Split-Path -Parent $g431Root) 'keil5_foc'
 $testExe = Join-Path $g431Root 'Objects\test_control.exe'
 New-Item -ItemType Directory -Path (Split-Path -Parent $testExe) -Force | Out-Null
 & $Gcc -std=c99 -Wall -Wextra -Werror `
+    -DG431_HOST_TEST `
     -I (Join-Path $g431Root 'User') `
     -I (Join-Path $g431Root 'BSP') `
     -I (Join-Path $sharedRoot 'Control') `
@@ -26,6 +27,7 @@ if ($LASTEXITCODE -ne 0) { throw 'CAN command test build failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'CAN command tests failed.' }
 $limitExe = Join-Path $g431Root 'Objects\test_current_limit.exe'
 & $Gcc -std=c99 -Wall -Wextra -Werror `
+    -DG431_HOST_TEST `
     -I (Join-Path $g431Root 'User') `
     (Join-Path $g431Root 'User\current_limit.c') `
     (Join-Path $PSScriptRoot 'test_current_limit.c') -lm -o $limitExe

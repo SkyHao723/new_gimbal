@@ -262,6 +262,17 @@
       <button data-vel="40">40</button>
     </div>
 
+    <label>运动模式 M</label>
+    <div class="row" style="margin-bottom:6px">
+      <button id="btnModeSmooth" class="primary" title="走 S 曲线轨迹：有加减速规划，起停柔和">缓动 M0</button>
+      <button id="btnModeDirect" title="不走轨迹规划：位置环直接拉到位，起停更干脆（云台瞄准用）">直驱 M1</button>
+      <span id="modeNow" style="font-size:12px;color:var(--dim);align-self:center">当前: —</span>
+    </div>
+    <div style="font-size:12px; color:var(--dim); margin-bottom:14px">
+      缓动 = 轨迹规划（默认，速度/加速度受限，动作柔和）；直驱 = 不做轨迹规划，位置环用当前电压上限直接推到目标，
+      到位更快但冲击更大。直驱受电压上限与电流限幅约束，太快会触发 1.6 A 折叠。
+    </div>
+
     <div class="row">
       <button id="btnReadEncoder">读编码器 (R)</button>
       <button id="btnQuickStatus">查询状态 (?)</button>
@@ -415,7 +426,7 @@ function setConn(on) {
   $('btnDisconnect').disabled = !on;
   const dis = !on;
   ['btnEnable','btnDisable','btnQuery','btnSendTarget','btnTargetZero',
-   'btnSetVlim','btnSetVellim','btnReadEncoder','btnQuickStatus','btnTrace',
+   'btnSetVlim','btnSetVellim','btnReadEncoder','btnQuickStatus','btnTrace','btnModeSmooth','btnModeDirect',
    'targetAngle','vlim','vellim'].forEach(id => { if($(id)) $(id).disabled = dis; });
   $('btnTargetCur').disabled = dis || !haveAngle;
   document.querySelectorAll('[data-tgt],[data-step],[data-vlim],[data-vel]').forEach(b => b.disabled = dis);
@@ -659,6 +670,10 @@ function parseLine(line, node) {
   if ((m = line.match(/I pk=([\d.]+)A/))) {
     const v = num(m[1]); if (v !== null) st.pk = v;
   }
+  if ((m = line.match(/mode=(SMOOTH|DIRECT)/))) {
+    st.mode = m[1];
+    if (!nodes.length || owner === selectedNode) setModeUI(m[1]);
+  }
 
   /* 选中节点（或串口单机）的状态才刷到上面的大卡片 */
   if (!nodes.length || owner === selectedNode) applyNodeToCards(st);
@@ -672,6 +687,17 @@ function setEnableUI(on) {
   $('enableBox').className = 'enableBox' + (on ? ' on' : '');
   $('enHint').textContent = on ? '电机已使能 —— 通电中，随时可点「失能 / 急停」'
                                : '电机当前失能，点「使能」才会通电';
+}
+
+/* 运动模式（缓动 M0 / 直驱 M1）的界面状态 */
+let currentMode = null;
+function setModeUI(mode) {
+  currentMode = mode;
+  const el = $('modeNow');
+  if (el) el.textContent = '当前: ' + (mode === 'DIRECT' ? '直驱 M1' : '缓动 M0');
+  const bs = $('btnModeSmooth'), bd = $('btnModeDirect');
+  if (bs) bs.className = mode === 'DIRECT' ? '' : 'primary';
+  if (bd) bd.className = mode === 'DIRECT' ? 'primary' : '';
 }
 
 /* ---------------- 发送 ---------------- */
@@ -803,6 +829,16 @@ $('btnEnable').onclick = async () => {
   }
 };
 $('btnDisable').onclick = () => send('D');
+
+/* 运动模式：缓动 M0 = 走轨迹规划；直驱 M1 = 不做规划、位置环直接拉到位 */
+$('btnModeSmooth').onclick = async () => {
+  if (await send('M0')) setModeUI('SMOOTH');
+};
+$('btnModeDirect').onclick = async () => {
+  if (currentMode === 'DIRECT') return;
+  if (!confirm('切换到直驱模式（不做缓启缓停）？\n\n位置环会用当前电压上限直接推到目标，\n动作更干脆但冲击更大，较大的位移会听到明显"砰"声。\n\n继续？')) return;
+  if (await send('M1')) setModeUI('DIRECT');
+};
 
 /* 抓抖动波形：让固件把接下来约 3 秒（1200 个控制周期）的角度/速度/uq 存进 RAM。
    事后用 ST-Link 读 bench_trace / bench_trace_meta 即可分析。 */

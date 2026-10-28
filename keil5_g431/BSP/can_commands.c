@@ -18,7 +18,7 @@ unsigned int can_commands_receive(CanCommands *s, const uint8_t *data, size_t co
     case 'E': case '?': case 'R': case 'H': case 'X':
         if (count != 1u) return BOARD_STOP_CAN;
         break;
-    case 'T': case 'V': case 'L':
+    case 'T': case 'V': case 'L': case 'M':
         if (count != 5u) return BOARD_STOP_CAN;
         command.bits = (uint32_t)data[1] | (uint32_t)data[2] << 8 |
                        (uint32_t)data[3] << 16 | (uint32_t)data[4] << 24;
@@ -45,7 +45,8 @@ int can_commands_take(CanCommands *s, CanCommand *command)
 void can_command_format(const CanCommand *command, char *dst)
 {
     float value;
-    if (command->opcode == 'T' || command->opcode == 'V' || command->opcode == 'L') {
+    if (command->opcode == 'T' || command->opcode == 'V' || command->opcode == 'L' ||
+        command->opcode == 'M') {
         memcpy(&value, &command->bits, sizeof(value));
         /* Nine significant digits round-trip a float32 into the shared parser. */
         snprintf(dst, BOARD_COMMAND_LENGTH, "%c%.9g", (int)command->opcode, (double)value);

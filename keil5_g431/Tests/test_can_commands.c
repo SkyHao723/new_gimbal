@@ -17,7 +17,7 @@ int main(void)
 {
     static const float values[] = {-1000000.0f, -100.0f, -0.12345678f, -0.0f,
                                   0.000000001f, 0.2f, 3.14159265f, 20.0f, 1000000.0f};
-    static const char ops[] = {'T', 'V', 'L'};
+    static const char ops[] = {'T', 'V', 'L', 'M'};
     CanCommands queue = {0};
     char result[BOARD_COMMAND_LENGTH];
     unsigned int i, j;

@@ -66,7 +66,7 @@ def send(bus, text):
     if not text:
         raise SystemExit("empty command")
     op = text[0]
-    if op in ("T", "V", "L"):
+    if op in ("T", "V", "L", "M"):
         value = float(text[1:])
         payload = bytes([ord(op)]) + struct.pack("<f", value)
     else:

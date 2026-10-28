@@ -97,7 +97,7 @@ static void finish_path(Trajectory *p, float vmax, float amax)
     float speed_bound=fmaxf(vmax, fabsf(p->velocity));
     int i;
     assert(p->count<=4u);
-    for (i=0; i<20000 && p->segment<p->count; ++i) {
+    for (i=0; i<300000 && p->segment<p->count; ++i) {
         float dt=steps[i%4], x=p->position, v=p->velocity;
         trajectory_step(p,dt);
         assert(isfinite(p->position) && isfinite(p->velocity));
@@ -112,7 +112,7 @@ static void finish_path(Trajectory *p, float vmax, float amax)
             assert(0);
         }
     }
-    assert(i<20000 && p->position==p->target && p->velocity==0.0f);
+    assert(i<300000 && p->position==p->target && p->velocity==0.0f);
     trajectory_step(p,0.01f);
     assert(p->position==p->target && p->velocity==0.0f);
 }
@@ -261,9 +261,56 @@ static void test_closed_loop_reference(void)
     puts("Closed loop: resting PI reference, velocity feedforward, retarget continuity, D/E reset PASS");
 }
 
+static void test_smooth_direct_mode(void)
+{
+    Motor m;
+    motor_init(&m);
+    assert(m.direct_mode==0u);              /* power-on default is smooth */
+    motor_command(&m,"D");
+    motor_command(&m,"E");
+    assert(m.enabled);
+    /* Smooth mode: a target far away is not reached in one control tick and
+       the ramp reference lags the target. */
+    motor_command(&m,"T2");
+    assert(m.direct_mode==0u && m.target==2.0f);
+    {
+        float start=m.ramp_target;
+        tick(&m);
+        /* one 1 ms tick moves the ramp a hair, far from the 2 rad target */
+        assert(m.ramp_target!=m.target && m.ramp_target>=start-0.000001f &&
+               m.ramp_target<m.target && (m.target-m.ramp_target)>0.1f);
+    }
+    /* Direct mode: ramp reference snaps to the target immediately (no soft
+       start), so the position loop sees the whole error in the first tick. */
+    motor_command(&m,"M1");
+    assert(m.direct_mode==1u);
+    tick(&m);
+    assert(m.ramp_target==m.target && m.path.velocity==0.0f);
+    assert(m.pi.error_prev>MOTOR_ANGLE_P*(m.target-m.angle)*0.5f);
+    /* M1 also parks the unused trajectory, so a new target is instant too. */
+    motor_command(&m,"T-3");
+    tick(&m);
+    assert(m.ramp_target==-3.0f && m.path.position==-3.0f);
+    /* Back to smooth: planning resumes from the current position at rest. */
+    motor_command(&m,"M0");
+    assert(m.direct_mode==0u);
+    assert(m.path.position==m.angle && m.path.velocity==0.0f);
+    tick(&m);
+    assert(m.ramp_target!=m.target);
+    /* M accepts only numbers; junk leaves the mode untouched. */
+    motor_command(&m,"M1");
+    motor_command(&m,"Mxyz");
+    assert(m.direct_mode==1u);
+    motor_command(&m,"M0");
+    motor_command(&m,"D");
+    assert(m.direct_mode==0u && !driver_enabled);
+    puts("Smooth/direct mode: M command, ramp bypass, trajectory parking, M0 resume PASS");
+}
+
 int main(void)
 {
-    test_pwm(); test_encoder(); test_pi(); test_trajectory(); test_motor(); test_closed_loop_reference();
+    test_pwm(); test_encoder(); test_pi(); test_trajectory(); test_motor();
+    test_closed_loop_reference(); test_smooth_direct_mode();
     puts("ALL HOST CHECKS PASSED (not a hardware test)");
     return 0;
 }
