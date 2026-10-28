@@ -102,7 +102,7 @@
 
   <h1>BLDC 云台电机控制器</h1>
   <div class="sub">
-    官方 SimpleFOC 2.4.0 · STM32F103C8T6 + DRV8316C + AS5600 · Web Serial 直连
+    STM32G431 + DRV8316C + AS5600 · Web Serial（F103）或 CAN 桥（G431，可同时控制 node1/2/3）
   </div>
 
   <div id="unsupported" class="unsupported" style="display:none">
@@ -117,6 +117,13 @@
       <button id="btnDisconnect" disabled>断开</button>
       <span id="connState"><span class="dot" id="dot"></span><span id="connText">未连接</span></span>
       <span style="margin-left:auto; display:flex; gap:10px; align-items:center">
+        <label style="margin:0; display:none" id="nodeLabel">节点</label>
+        <select id="nodeSel" style="display:none; width:110px">
+          <option value="1">板 1 (node1)</option>
+          <option value="2">板 2 (node2)</option>
+          <option value="3">板 3 (node3)</option>
+          <option value="0">广播 (所有板)</option>
+        </select>
         <label style="margin:0">波特率</label>
         <input type="number" id="baud" value="115200" step="1" style="width:110px">
       </span>
@@ -153,6 +160,20 @@
       <button id="btnQuery">读取一次状态</button>
       <span style="color:var(--dim); font-size:12px" id="lastRx">尚未收到数据</span>
     </div>
+    <table id="nodeTable" style="display:none; width:100%; border-collapse:collapse; margin-top:12px; font-size:13px">
+      <thead>
+        <tr style="color:var(--dim); text-align:left">
+          <th style="padding:4px 6px; font-weight:600">节点</th>
+          <th style="padding:4px 6px; font-weight:600">使能</th>
+          <th style="padding:4px 6px; font-weight:600">角度 (rad)</th>
+          <th style="padding:4px 6px; font-weight:600">目标 (rad)</th>
+          <th style="padding:4px 6px; font-weight:600">误差 (rad)</th>
+          <th style="padding:4px 6px; font-weight:600">电压上限</th>
+          <th style="padding:4px 6px; font-weight:600">电流 pk</th>
+        </tr>
+      </thead>
+      <tbody id="nodeRows"></tbody>
+    </table>
   </div>
 
   <!-- ============ 电机控制 ============ -->
@@ -286,12 +307,20 @@ const SUPPORTED = BRIDGE ? true : ('serial' in navigator);
 
 let port = null, reader = null, writer = null, ws = null;
 let connected = false, pollTimer = null;
-let rxBuffer = '';
 let currentAngle = 0;
 let haveAngle = false;
 let txTail = Promise.resolve();
 let pollInFlight = false;
 let connectionEpoch = 0;
+
+/* ---- 多节点（仅 CAN 桥模式） ---- */
+/* 页面可以同时看三块板：nodeState 缓存每块板最近一次状态，nodeSel 决定
+   下面所有控制命令发给哪块板（0 = 广播，三块都收、都不回）。 */
+let nodes = [];                 /* 桥上报的节点列表，串口模式为空 */
+let selectedNode = 1;
+const nodeState = new Map();    /* node -> {en,angle,vel,tgt,vlim,vbus,dir,zero,pk,allowed,trips,ts} */
+const rxBufs = new Map();       /* node -> 未成行的文本缓冲 */
+
 const DEFAULT_VLIM = 3.0;
 /* G431 板（DRV8316C）硬上限 8 V；F103 板固件内部还会再夹到自己的 5 V */
 const MAX_VLIM = 8.0;
@@ -323,7 +352,7 @@ async function connect() {
     const epoch = ++connectionEpoch;
     writer = port.writable.getWriter();
     connected = true;
-    rxBuffer = '';
+    rxBufs.clear();
     haveAngle = false;
     setConn(true);
     log(`已连接，波特率 ${baud}`, 'sys');
@@ -331,7 +360,7 @@ async function connect() {
     readLoop();
     // 固件没有开机横幅，主动查询一次状态
     setTimeout(async () => {
-      if (epoch === connectionEpoch && connected) await send('?');
+      if (epoch === connectionEpoch && connected) await pollOnce();
     }, 400);
     if ($('poll').checked) startPoll();
   } catch (e) {
@@ -358,7 +387,7 @@ async function disconnect() {
   try { if (reader) { await reader.cancel(); reader = null; } } catch(e){}
   try { if (writer) { writer.releaseLock(); writer = null; } } catch(e){}
   try { if (port) { await port.close(); port = null; } } catch(e){}
-  rxBuffer = '';
+  rxBufs.clear();
   resetStatusUI();
   setConn(false);
   log('已断开', 'sys');
@@ -387,15 +416,123 @@ function setConn(on) {
 }
 
 /* ---------------- WebSocket -> CAN 桥 ---------------- */
-/* 把收到的一小段文本按 \n 切行，串口和桥都走这里 */
-function handleIncoming(text) {
+/* 把收到的一小段文本按 \n 切行，串口和桥都走这里。
+   node = 0 表示"串口单机"，>0 表示来自哪块板。 */
+function handleIncoming(text, node) {
+  const key = node || 0;
+  let rxBuffer = rxBufs.get(key) || '';
   rxBuffer += text;
   let idx;
   while ((idx = rxBuffer.indexOf('\n')) >= 0) {
     const line = rxBuffer.slice(0, idx).replace(/\r$/, '');
     rxBuffer = rxBuffer.slice(idx + 1);
-    if (line.trim()) { log(line); parseLine(line); }
+    if (line.trim()) {
+      const other = node > 0 && node !== selectedNode;
+      log((other ? '[n' + node + '] ' : '') + line, other ? 'rx dim' : undefined);
+      parseLine(line, node);
+    }
   }
+  rxBufs.set(key, rxBuffer);
+}
+
+/* 桥模式下连接、解析 JSON 帧；串口模式仍是纯文本 */
+function applyBridgeFrame(data) {
+  let payload = null;
+  try { payload = JSON.parse(data); } catch (e) { payload = null; }
+  if (!payload) { handleIncoming(String(data), 0); return; }
+  if (Array.isArray(payload.nodes)) { setNodes(payload.nodes); return; }
+  if (payload.error) { log('桥错误：' + payload.error, 'err'); return; }
+  if (payload.node && typeof payload.text === 'string') {
+    handleIncoming(payload.text, payload.node);
+  }
+}
+
+function setNodes(list) {
+  nodes = list.map(n => parseInt(n, 10)).filter(n => n > 0);
+  if (!nodes.length) return;
+  if (!nodes.includes(selectedNode)) selectedNode = nodes[0];
+  const sel = $('nodeSel');
+  sel.innerHTML = '';
+  nodes.forEach(n => {
+    const opt = document.createElement('option');
+    opt.value = String(n);
+    opt.textContent = '板 ' + n + ' (node' + n + ')';
+    sel.appendChild(opt);
+  });
+  const bcast = document.createElement('option');
+  bcast.value = '0';
+  bcast.textContent = '广播 (所有板)';
+  sel.appendChild(bcast);
+  sel.value = String(selectedNode);
+  sel.style.display = '';
+  $('nodeLabel').style.display = '';
+  sel.onchange = () => selectNode(parseInt(sel.value, 10));
+  renderNodeTable();
+  selectNode(selectedNode);
+}
+
+function nodeStateOf(node) {
+  if (!nodeState.has(node)) nodeState.set(node, {});
+  return nodeState.get(node);
+}
+
+function renderNodeTable() {
+  const tbody = $('nodeRows');
+  if (!nodes.length) { $('nodeTable').style.display = 'none'; return; }
+  tbody.innerHTML = '';
+  nodes.forEach(n => {
+    const st = nodeStateOf(n);
+    const err = (st.angle !== undefined && st.tgt !== undefined) ? (st.angle - st.tgt) : null;
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.style.borderTop = '1px solid var(--line, #2a2a2a)';
+    if (n === selectedNode) tr.style.background = 'rgba(120,180,255,0.10)';
+    tr.onclick = () => selectNode(n);
+    const cells = [
+      'node' + n,
+      st.en === undefined ? '—' : (st.en ? 'ON' : 'OFF'),
+      st.angle === undefined ? '—' : st.angle.toFixed(4),
+      st.tgt === undefined ? '—' : st.tgt.toFixed(4),
+      err === null ? '—' : (err >= 0 ? '+' : '') + err.toFixed(4),
+      st.vlim === undefined ? '—' : st.vlim.toFixed(2) + ' V',
+      st.pk === undefined ? '—' : st.pk.toFixed(2) + ' A'
+    ];
+    cells.forEach((text, i) => {
+      const td = document.createElement('td');
+      td.textContent = text;
+      td.style.padding = '4px 6px';
+      if (i === 1) td.style.color = st.en ? 'var(--ok)' : 'var(--dim)';
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  $('nodeTable').style.display = '';
+}
+
+function selectNode(node) {
+  selectedNode = node;
+  const sel = $('nodeSel');
+  if (sel && String(sel.value) !== String(node)) sel.value = String(node);
+  const st = node === 0 ? null : nodeStateOf(node);
+  rxBufs.set(node || 0, '');
+  resetStatusUI();
+  if (st) applyNodeToCards(st);
+  renderNodeTable();
+  log(node === 0 ? '当前目标：广播（所有板，无回包）' : '当前控制节点：板 ' + node, 'sys');
+  if (connected && node !== 0) send('?');
+}
+
+/* 把某块板的状态刷到上面的大卡片上 */
+function applyNodeToCards(st) {
+  if (st.en !== undefined) setEnableUI(st.en);
+  if (st.angle !== undefined) { currentAngle = st.angle; haveAngle = true; $('stAngle').textContent = st.angle.toFixed(4); }
+  if (st.vel !== undefined) $('stVel').textContent = st.vel.toFixed(4);
+  if (st.tgt !== undefined) $('stTgt').textContent = st.tgt.toFixed(4);
+  if (st.vlim !== undefined) { $('stVlim').textContent = st.vlim.toFixed(2) + ' V'; $('vlim').value = st.vlim; updateVlimHint(st.vlim); }
+  if (st.vbus !== undefined) $('stVbus').textContent = st.vbus.toFixed(1) + ' V';
+  if (st.dir !== undefined) $('stDir').textContent = st.dir === 1 ? 'CW (1)' : (st.dir === -1 ? 'CCW (-1)' : '未知 (0)');
+  if (st.zero !== undefined) $('stZero').textContent = st.zero.toFixed(4);
+  $('btnTargetCur').disabled = !connected || !haveAngle;
 }
 
 async function connectBridge() {
@@ -406,7 +543,8 @@ async function connectBridge() {
       ws = sock;
       sock.onopen = () => resolve();
       sock.onerror = () => reject(new Error('连不上 ' + BRIDGE.ws + '，先运行 tools/g431_can_bridge.py'));
-      sock.onmessage = ev => { if (connected) handleIncoming(String(ev.data)); };
+      /* 桥在 onopen 之前就会推 {nodes:[...]}，所以这里不能按 connected 过滤 */
+      sock.onmessage = ev => { if (sock !== ws) return; applyBridgeFrame(String(ev.data)); };
       sock.onclose = () => {
         ws = null;
         if (connected) {
@@ -420,12 +558,13 @@ async function connectBridge() {
     });
     const epoch = ++connectionEpoch;
     connected = true;
-    rxBuffer = '';
+    rxBufs.clear();
+    nodeState.clear();
     haveAngle = false;
     setConn(true);
     log('已连接 CAN 桥（WebSocket）', 'sys');
     setTimeout(async () => {
-      if (epoch === connectionEpoch && connected) await send('?');
+      if (epoch === connectionEpoch && connected) await pollOnce();
     }, 200);
     if ($('poll').checked) startPoll();
   } catch (e) {
@@ -446,7 +585,7 @@ async function readLoop() {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        handleIncoming(decoder.decode(value, { stream: true }));
+        handleIncoming(decoder.decode(value, { stream: true }), 0);
       }
     } catch (e) {
       if (connected) log('读取中断：' + e.message, 'err');
@@ -464,9 +603,13 @@ async function readLoop() {
      sensor angle=4.133  vel=0.001  mech=0.590                                  */
 function num(s){ const v = parseFloat(s); return isNaN(v) ? null : v; }
 
-function parseLine(line) {
+function parseLine(line, node) {
   $('lastRx').textContent = '最近更新：' + new Date().toLocaleTimeString('zh-CN', {hour12:false});
 
+  /* 这一行属于哪块板：串口单机记到 node 1，桥模式下用真实节点号 */
+  const owner = node > 0 ? node : 1;
+  const st = nodeStateOf(owner);
+  st.ts = Date.now();
   let m;
 
   /* --- 使能状态：三种格式都要认 ---
@@ -477,37 +620,43 @@ function parseLine(line) {
   if ((m = line.match(/EN=(ON|OFF)/)))      enState = m[1];
   else if (/^EN\s+ON\b/.test(line))         enState = 'ON';
   else if (/^EN\s+OFF\b/.test(line))        enState = 'OFF';
-  if (enState) setEnableUI(enState === 'ON');
+  if (enState) st.en = (enState === 'ON');
 
   /* --- 目标角度："target=0.500" 来自 T 命令应答 --- */
   if ((m = line.match(/target=(-?[\d.]+)/))) {
     const v = num(m[1]);
-    if (v !== null) { $('stTgt').textContent = v.toFixed(4); $('targetAngle').value = v; }
+    if (v !== null) { st.tgt = v; if (owner === selectedNode || !nodes.length) $('targetAngle').value = v; }
   }
 
   if ((m = line.match(/(?:^|\s)angle=(-?[\d.]+)/))) {
     const v = num(m[1]);
-    if (v !== null) { currentAngle = v; haveAngle = true; $('stAngle').textContent = v.toFixed(4); $('btnTargetCur').disabled = !connected; }
+    if (v !== null) { st.angle = v; }
   }
   if ((m = line.match(/vel=(-?[\d.]+)/))) {
-    const v = num(m[1]); if (v !== null) $('stVel').textContent = v.toFixed(4);
+    const v = num(m[1]); if (v !== null) st.vel = v;
   }
   if ((m = line.match(/tgt=(-?[\d.]+)/))) {
-    const v = num(m[1]); if (v !== null) $('stTgt').textContent = v.toFixed(4);
+    const v = num(m[1]); if (v !== null) st.tgt = v;
   }
   if ((m = line.match(/Vlim=([\d.]+)/))) {
-    const v = num(m[1]); if (v !== null) { $('stVlim').textContent = v.toFixed(2) + ' V'; $('vlim').value = v; updateVlimHint(v); }
+    const v = num(m[1]); if (v !== null) st.vlim = v;
   }
   if ((m = line.match(/Vbus=([\d.]+)/))) {
-    const v = num(m[1]); if (v !== null) $('stVbus').textContent = v.toFixed(1) + ' V';
+    const v = num(m[1]); if (v !== null) st.vbus = v;
   }
   if ((m = line.match(/dir=(-?\d+)/))) {
-    const v = parseInt(m[1], 10);
-    $('stDir').textContent = v === 1 ? 'CW (1)' : (v === -1 ? 'CCW (-1)' : '未知 (0)');
+    st.dir = parseInt(m[1], 10);
   }
   if ((m = line.match(/zero=(-?[\d.]+)/))) {
-    const v = num(m[1]); if (v !== null) $('stZero').textContent = v.toFixed(4);
+    const v = num(m[1]); if (v !== null) st.zero = v;
   }
+  if ((m = line.match(/I pk=([\d.]+)A/))) {
+    const v = num(m[1]); if (v !== null) st.pk = v;
+  }
+
+  /* 选中节点（或串口单机）的状态才刷到上面的大卡片 */
+  if (!nodes.length || owner === selectedNode) applyNodeToCards(st);
+  if (nodes.length) renderNodeTable();
 }
 
 /* 统一更新使能相关的界面状态 */
@@ -520,15 +669,17 @@ function setEnableUI(on) {
 }
 
 /* ---------------- 发送 ---------------- */
+/* 桥模式下给命令带上节点号：{node: 2, cmd: "T1.5"}；串口模式仍是纯文本 */
 async function send(cmd) {
   if (!connected || (!writer && !ws)) { log('未连接，无法发送', 'err'); return false; }
   const epoch = connectionEpoch;
+  const node = nodes.length ? selectedNode : (BRIDGE ? 1 : 0);
   const job = txTail.then(async () => {
     if (epoch !== connectionEpoch || !connected) return false;
     if (ws && ws.readyState === WebSocket.OPEN) {
       try {
-        ws.send(cmd);
-        logTx(cmd);
+        ws.send(JSON.stringify({ node: node, cmd: cmd }));
+        logTx(node ? ('[' + node + '] ' + cmd) : cmd);
         return true;
       } catch (e) {
         log('发送失败：' + e.message, 'err');
@@ -551,14 +702,33 @@ async function send(cmd) {
 }
 
 /* ---------------- 自动轮询 ---------------- */
+/* 桥模式：一帧 {"node":"all"} 让桥依次问三块板，一次轮询刷新整张表；
+   串口模式：单机，直接发 ? */
+function pollOnce() {
+  if (!connected) return Promise.resolve(false);
+  if (nodes.length) {
+    const job = txTail.then(() => {
+      if (!connected || !ws || ws.readyState !== WebSocket.OPEN) return false;
+      try {
+        ws.send(JSON.stringify({ node: 'all', cmd: '?' }));
+        return true;
+      } catch (e) { return false; }
+    });
+    txTail = job.catch(() => false);
+    return job;
+  }
+  return send('?');
+}
+
 function startPoll() {
   stopPoll();
+  const period = nodes.length ? 900 : 400;
   pollTimer = setInterval(() => {
     if (connected && !pollInFlight) {
       pollInFlight = true;
-      send('?').finally(() => { pollInFlight = false; });
+      pollOnce().finally(() => { pollInFlight = false; });
     }
-  }, 400);
+  }, period);
 }
 function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
@@ -595,6 +765,15 @@ $('btnDisconnect').onclick = disconnect;
 $('btnClear').onclick      = () => { $('log').innerHTML = ''; };
 $('poll').onchange         = () => { $('poll').checked ? startPoll() : stopPoll(); };
 
+/* 节点切换：桥模式才有意义；串口单机隐藏选择器和总览表 */
+if ($('nodeSel')) {
+  $('nodeSel').onchange = () => selectNode(parseInt($('nodeSel').value, 10));
+}
+if (!BRIDGE) {
+  if ($('nodeSel')) { $('nodeSel').style.display = 'none'; $('nodeLabel').style.display = 'none'; }
+  $('nodeTable').style.display = 'none';
+}
+
 $('btnQuery').onclick       = () => send('?');
 $('btnQuickStatus').onclick = () => send('?');
 $('btnReadEncoder').onclick = () => send('R');
@@ -612,7 +791,8 @@ function readFiniteInput(id, label, min) {
 /* 使能需要二次确认 */
 $('btnEnable').onclick = async () => {
   const v = $('vlim').value;
-  if (confirm(`确认要使能电机？\n\n当前电压上限 ${v} V\n\n请确保：\n· 电机已固定\n· 周围无人\n· 手放在电源开关上\n\n继续？`)) {
+  const who = nodes.length ? (selectedNode === 0 ? '广播（所有板）' : '板 ' + selectedNode) : '电机';
+  if (confirm('确认要使能' + who + '？\n\n当前电压上限 ' + v + ' V\n\n请确保：\n· 电机已固定\n· 周围无人\n· 手放在电源开关上\n\n继续？')) {
     await send('E');
   }
 };
@@ -691,7 +871,7 @@ document.addEventListener('keydown', e => {
 /* 初始状态 */
 setConn(false);
 updateVlimHint(DEFAULT_VLIM);
-log('页面已就绪。请点「连接串口」选择 CH340 串口设备。', 'sys');
+log(BRIDGE ? '页面已就绪。点「连接」接入 CAN 桥，然后用「节点」下拉框切换板 1/2/3。' : '页面已就绪。请点「连接串口」选择 CH340 串口设备。', 'sys');
 log('提示：按 Esc 可随时急停。', 'sys');
 </script>
 </body>

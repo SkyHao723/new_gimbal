@@ -1,24 +1,36 @@
 #!/usr/bin/env python3
-"""G431 CAN <-> WebSocket bridge.
+"""G431 CAN <-> WebSocket bridge (single board or a bus of several boards).
 
-The web controller page (tools/web_controller/index.html) speaks Web Serial,
-but the G431 board has no UART: its only host link is FDCAN.  This bridge
-serves the page over HTTP and relays its text commands to the board over CAN,
-so the same page can drive the G431 with no firmware or hardware change.
+The web controller page (tools/web_controller/index.html) speaks Web Serial, but
+the G431 board has no UART: its only host link is FDCAN.  This bridge serves the
+page over HTTP and relays its commands to the boards over CAN, so the same page
+can drive three boards independently (`--nodes 1,2,3`).
 
-    python tools/g431_can_bridge.py
+    python tools/g431_can_bridge.py --nodes 1,2,3
     -> open http://127.0.0.1:8766/  and press "连接"
 
 Wire format it speaks (see keil5_g431/BSP/can_commands.c):
-    0x201  E / D / ? / R / H        one byte
-    0x201  T / V / L                one opcode + float32 little endian
-    0x281  reply                   ASCII text (the firmware printf stream)
+    0x200+n  E / D / ? / R / H        one byte
+    0x200+n  T / V / L                one opcode + float32 little endian
+    0x280+n  reply                    ASCII text (the firmware printf stream)
+    0x200    broadcast command        no reply
+
+Browser protocol (JSON text frames):
+    <- {"nodes": [1, 2, 3]}                    on connect
+    <- {"node": 2, "text": "EN=ON angle=..."}  one reply chunk from board 2
+    <- {"error": "..."}                        bridge / CAN error
+    -> {"node": 2, "cmd": "T1.5"}              command to board 2
+    -> {"node": "all", "cmd": "?"}             command to every board
+    -> {"node": 0, "cmd": "D"}                 broadcast (0x200, nobody replies)
+Plain text frames are still accepted and go to the first configured node, so an
+old client keeps working.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import struct
 import sys
@@ -51,22 +63,11 @@ try:
 except ImportError:  # pragma: no cover - older websockets
     from websockets.server import serve as ws_serve
 
-CMD_ID = 0x201
-REPLY_ID = 0x281
 DEFAULT_BITRATE = 500_000
-NODE = 1
-
-
-def set_node(node: int) -> None:
-    """Select which board this bridge talks to (1..7 -> 0x201..0x207 / 0x281..0x287)."""
-    global CMD_ID, REPLY_ID, NODE
-    NODE = node
-    CMD_ID = 0x200 + node
-    REPLY_ID = 0x280 + node
+BROADCAST_ID = 0x200
 # One CAN frame per board main-loop iteration; the firmware queue is 40 deep and
 # the loop also services FOC, so keep a small gap instead of flooding it.
 CMD_GAP_S = 0.035
-# A 12-bit encoder step at 25 kHz PWM still fits comfortably inside this gap.
 PAGE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_controller")
 INJECT_TEMPLATE = '<script>window.__G431_BRIDGE__={ws:"ws://127.0.0.1:%d"};</script>'
 
@@ -88,12 +89,18 @@ def encode_command(text: str) -> bytes:
 
 
 class Bridge:
-    def __init__(self, bus: can.BusABC) -> None:
+    def __init__(self, bus: can.BusABC, nodes: list[int]) -> None:
         self.bus = bus
+        self.nodes = nodes
+        self.default_node = nodes[0] if nodes else 1
+        self.reply_to_node = {0x280 + n: n for n in nodes}
         self.clients: set = set()
         self.loop: asyncio.AbstractEventLoop | None = None
-        self.queue: asyncio.Queue[str] = asyncio.Queue()
+        self.queue: asyncio.Queue[dict] = asyncio.Queue()
         self._thread: threading.Thread | None = None
+
+    def command_id(self, node: int) -> int:
+        return BROADCAST_ID if node == 0 else 0x200 + node
 
     # ---- CAN -> browser -------------------------------------------------
     def start_can_reader(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -105,22 +112,81 @@ class Bridge:
                     msg = self.bus.recv(timeout=0.2)
                 except Exception:  # bus closed / adapter removed
                     return
-                if msg is None or msg.arbitration_id != REPLY_ID:
+                if msg is None:
                     continue
-                text = msg.data.decode("ascii", "replace")
-                loop.call_soon_threadsafe(self.queue.put_nowait, text)
+                node = self.reply_to_node.get(msg.arbitration_id)
+                if node is None:
+                    continue
+                self.loop.call_soon_threadsafe(
+                    self.queue.put_nowait,
+                    {"node": node, "text": msg.data.decode("ascii", "replace")},
+                )
 
         self._thread = threading.Thread(target=pump, name="can-rx", daemon=True)
         self._thread.start()
 
     async def broadcast_loop(self) -> None:
         while True:
-            text = await self.queue.get()
+            payload = await self.queue.get()
+            text = json.dumps(payload)
             for ws in list(self.clients):
                 try:
                     await ws.send(text)
                 except Exception:
                     self.clients.discard(ws)
+
+    # ---- browser -> CAN -------------------------------------------------
+    async def dispatch(self, ws, message: str) -> None:
+        message = message.strip()
+        if not message:
+            return
+        target = self.default_node
+        cmd = message
+        if message.startswith("{"):
+            try:
+                payload = json.loads(message)
+            except json.JSONDecodeError as exc:
+                await ws.send(json.dumps({"error": f"bad json: {exc}"}))
+                return
+            if not isinstance(payload, dict) or "cmd" not in payload:
+                await ws.send(json.dumps({"error": "missing cmd"}))
+                return
+            cmd = str(payload.get("cmd", "")).strip()
+            target = payload.get("node", self.default_node)
+
+        if not cmd:
+            return
+        try:
+            frame = encode_command(cmd)
+        except (ValueError, IndexError) as exc:
+            await ws.send(json.dumps({"error": str(exc)}))
+            return
+
+        if target == "all":
+            targets = list(self.nodes)
+        else:
+            try:
+                targets = [int(target)]
+            except (TypeError, ValueError):
+                await ws.send(json.dumps({"error": f"bad node {target!r}"}))
+                return
+            if targets[0] != 0 and targets[0] not in self.nodes:
+                # still allow it: the board may be on the bus but not monitored
+                pass
+
+        for node in targets:
+            try:
+                self.bus.send(
+                    can.Message(
+                        arbitration_id=self.command_id(node),
+                        data=frame,
+                        is_extended_id=False,
+                    )
+                )
+            except Exception as exc:  # bus error: tell the page, keep going
+                await ws.send(json.dumps({"error": f"can: {exc}"}))
+                return
+            await asyncio.sleep(CMD_GAP_S)
 
 
 BRIDGE: Bridge | None = None
@@ -133,30 +199,12 @@ async def handle_client(ws, *_args) -> None:
     peer = getattr(ws, "remote_address", None)
     print(f"[ws] client connected {peer} (total {len(bridge.clients)})", flush=True)
     try:
+        await ws.send(json.dumps({"nodes": bridge.nodes}))
         async for message in ws:
             if isinstance(message, (bytes, bytearray)):
                 message = message.decode("ascii", "replace")
             for line in str(message).replace("\r", "\n").split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    frame = encode_command(line)
-                except (ValueError, IndexError) as exc:
-                    await ws.send(f"\r\nERR {exc}\r\n")
-                    continue
-                try:
-                    bridge.bus.send(
-                        can.Message(
-                            arbitration_id=CMD_ID,
-                            data=frame,
-                            is_extended_id=False,
-                        )
-                    )
-                except Exception as exc:  # bus error: tell the page, keep going
-                    await ws.send(f"\r\nERR can: {exc}\r\n")
-                    continue
-                await asyncio.sleep(CMD_GAP_S)
+                await bridge.dispatch(ws, line)
     except Exception:
         pass
     finally:
@@ -204,15 +252,16 @@ def start_http(port: int, ws_port: int) -> ThreadingHTTPServer:
     return server
 
 
-async def run(args, bus: can.BusABC) -> None:
+async def run(args, bus: can.BusABC, nodes: list[int]) -> None:
     global BRIDGE
-    BRIDGE = Bridge(bus)
+    BRIDGE = Bridge(bus, nodes)
     loop = asyncio.get_running_loop()
     BRIDGE.start_can_reader(loop)
     asyncio.create_task(BRIDGE.broadcast_loop())
 
-    print(f"[can] channel={args.channel} bitrate={args.bitrate} "
-          f"cmd=0x{CMD_ID:03X} reply=0x{REPLY_ID:03X}", flush=True)
+    ids = ", ".join(f"0x{0x200 + n:03X}/0x{0x280 + n:03X}" for n in nodes)
+    print(f"[can] channel={args.channel} bitrate={args.bitrate} nodes={nodes} ({ids})",
+          flush=True)
     if not args.no_http:
         print(f"[web] http://127.0.0.1:{args.http_port}/", flush=True)
     print(f"[ws ] ws://127.0.0.1:{args.ws_port}", flush=True)
@@ -220,18 +269,35 @@ async def run(args, bus: can.BusABC) -> None:
         await asyncio.Future()
 
 
+def parse_nodes(value: str) -> list[int]:
+    nodes = []
+    for part in value.replace(" ", "").split(","):
+        if not part:
+            continue
+        node = int(part, 0)
+        if not 1 <= node <= 7:
+            raise argparse.ArgumentTypeError("node ids must be 1..7")
+        if node not in nodes:
+            nodes.append(node)
+    if not nodes:
+        raise argparse.ArgumentTypeError("at least one node id is required")
+    return nodes
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--channel", type=int, default=0, help="candleLight channel (default 0)")
     parser.add_argument("--bitrate", type=int, default=DEFAULT_BITRATE)
-    parser.add_argument("--node", type=int, default=1,
-                        help="board node id 1..7 (command 0x200+n / reply 0x280+n)")
+    parser.add_argument("--nodes", type=parse_nodes, default=[1, 2, 3],
+                        help="comma separated board node ids, e.g. 1,2,3 (default 1,2,3)")
+    parser.add_argument("--node", type=parse_nodes, default=None,
+                        help="single board id (shortcut for --nodes N)")
     parser.add_argument("--ws-port", type=int, default=8765)
     parser.add_argument("--http-port", type=int, default=8766)
     parser.add_argument("--no-http", action="store_true", help="only run the websocket bridge")
     args = parser.parse_args()
 
-    set_node(args.node)
+    nodes = args.node if args.node else args.nodes
     bus = can.Bus(
         interface="gs_usb",
         channel=args.channel,
@@ -241,7 +307,7 @@ def main() -> int:
     if not args.no_http:
         start_http(args.http_port, args.ws_port)
     try:
-        asyncio.run(run(args, bus))
+        asyncio.run(run(args, bus, nodes))
     except KeyboardInterrupt:
         print("\n[bridge] stopped", flush=True)
     finally:
