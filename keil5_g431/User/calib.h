@@ -39,12 +39,14 @@
 #define CALIB_ZERO_ELECTRIC      0.122f
 #define CALIB_SENSOR_DIRECTION   (-1)
 #elif BOARD_CAN_NODE == 3
-/* 2026-10-28 bidirectional align test on board 3 with motor 3: pp=11, dir=+1,
-   zero = 0.487 rad (rms 3.7 deg, max 7.4 deg; up/down pull hysteresis 5.8 deg).
-   The earlier single-pull run on 2026-10-27 gave 0.566 rad; it is biased by
-   friction, just like board 2 where two single-pull runs differed by 16 deg. */
-#define CALIB_ZERO_ELECTRIC      0.487f
-#define CALIB_SENSOR_DIRECTION   1
+/* 2026-10-28 (second run, after the phase wires were re-ordered to match the
+   other two boards) bidirectional align test on board 3 with motor 3:
+   pp=11, dir=-1, zero = 1.458 rad (rms 3.4 deg, max 5.5 deg; up/down pull
+   hysteresis 4-5 deg). The phase order changed the sign: before the rewiring
+   the same motor measured dir=+1 / zero=0.487 rad. The single-pull value from
+   2026-10-27 (0.566) is friction-biased, like on board 2 (16 deg spread). */
+#define CALIB_ZERO_ELECTRIC      1.458f
+#define CALIB_SENSOR_DIRECTION   (-1)
 #else
 #define CALIB_ZERO_ELECTRIC      1.697f
 #define CALIB_SENSOR_DIRECTION   (-1)
