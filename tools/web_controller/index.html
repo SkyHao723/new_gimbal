@@ -161,6 +161,11 @@
       <span style="color:var(--dim); font-size:12px" id="lastRx">尚未收到数据</span>
     </div>
     <table id="nodeTable" style="display:none; width:100%; border-collapse:collapse; margin-top:12px; font-size:13px">
+      <caption style="caption-side:bottom; text-align:left; padding:6px 6px 0; color:var(--dim); font-size:12px; line-height:1.5">
+        「电流 pk」是**单相电流峰值**，不是电源电流。三相桥是降压结构，
+        母线电流 ≈ 相电流 × (相电压 / 24V)，巡航时通常只有它的 1/5~1/10；
+        三块板 pk 相加 4A 而电源不到 1A 属于正常。
+      </caption>
       <thead>
         <tr style="color:var(--dim); text-align:left">
           <th style="padding:4px 6px; font-weight:600">节点</th>
