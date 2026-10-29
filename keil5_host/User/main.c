@@ -58,6 +58,9 @@ static void imu_bringup(void)
     uint8_t found[16];
     int n;
 
+    /* 先初始化 I2C1（PB6/PB7 引脚 + 外设 + 100k 时序），否则后面的扫描/读寄存器全是空转 */
+    imu_i2c_init();
+
     printf("\r\n[I2C] scanning 0x08..0x77 ...\r\n");
     n = imu_scan(found, 16);
     if (n <= 0) {
