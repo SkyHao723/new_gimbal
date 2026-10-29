@@ -35,6 +35,15 @@ void host_board_init(void)
     host_led(0);
 }
 
+/* HAL_Init() 打开 SysTick 中断后，必须有人递增 HAL tick。
+   驱动板工程里这件事在 BSP/board.c；上位机板不编 board.c，所以放在这里。
+   踩过的坑：缺这个函数时向量表落到启动文件的默认死循环，表现是串口打印到一半就停、
+   指示灯也不闪 —— 第一次 1 ms tick 就把 CPU 卡死了。 */
+void SysTick_Handler(void)
+{
+    HAL_IncTick();
+}
+
 void host_esp_uart_init(uint32_t baud)
 {
     GPIO_InitTypeDef gpio = {0};

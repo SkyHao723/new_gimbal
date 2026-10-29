@@ -96,3 +96,20 @@ IMU acc[g] 0.00 0.00 1.00   gyro[dps] 0.0 0.0 0.0   temp 25.0 C        <- 平放
 2. **PA5 灯极性**先按"低电平点亮"写（沿用驱动板），实测若相反只改 `host_config.h` 里的 `HOST_LED_ACTIVE_LOW`。
 3. **TJA1042 的 STB 脚**：这块板的引脚清单没提，代码默认 `HOST_CAN_DRIVE_STB_ON_PB5 = 0`（假设 STB 直接接地/下拉）。若 CAN 无输出且确认收发器有电，把该宏改 1 并确认 STB 实际接的是 PB5。
 4. ESP32-S3 只做了 UART2 初始化，协议留空。
+
+## 7. 第一次上板踩到的两个坑（2026-10-29，已修）
+
+1. **上电进了系统 bootloader**：这块板的 `PB8` 既是 `FDCAN1_RX`，又和 `BOOT0` 引脚复用/受其影响，
+   上电瞬间收发器把 PB8 拉高 → 芯片进 STM32 系统 bootloader，表现为"固件烧写成功但程序完全不跑"
+   （SWD 读 `USART1->CR1=0x140D`、`BRR=0`，是 bootloader 的 8E1 配置；`GPIOA/PB 的 MODER` 是 bootloader 配的）。
+   修法：写一次选项字节，让芯片忽略 BOOT0 引脚：
+   ```powershell
+   & $cli -c port=SWD mode=UR freq=200 -ob nSWBOOT0=0 nBOOT0=1
+   ```
+   （和驱动板同一个坑；写完后 SWD 读 `USART1->BRR == 0x5C4` 即说明跑的是本固件。）
+2. **缺 `SysTick_Handler`**：驱动板工程里这个函数在 `BSP/board.c`，上位机板不编 `board.c`，
+   于是第一次 1 ms tick 就落到启动文件的默认死循环：串口打印到一半停住、指示灯也不闪。
+   已把 `void SysTick_Handler(void) { HAL_IncTick(); }` 放进 `BSP/host_board.c`。
+
+自检办法（不依赖串口，用 SWD）：`ICSR(0xE000ED04)` 的 VECTACTIVE 应为 0；
+`GPIOA->ODR(0x48000014)` 的 bit5 每 0.5 s 翻转一次；`USART1->BRR(0x4001380C) = 0x5C4`。

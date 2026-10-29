@@ -83,7 +83,8 @@ int imu_scan(uint8_t *found, int max)
         i2c_apply_timing(speeds[s]);
         count = 0;
         for (uint16_t addr = HOST_IMU_ADDR_SCAN_FIRST; addr <= HOST_IMU_ADDR_SCAN_LAST; ++addr) {
-            if (HAL_I2C_IsDeviceReady(&i2c, (uint16_t)(addr << 1), 2u, 20u) == HAL_OK) {
+            /* 单次探测 3 ms：总线上没器件时整轮扫描要在 1 秒内结束，不然开机看着像死机 */
+            if (HAL_I2C_IsDeviceReady(&i2c, (uint16_t)(addr << 1), 1u, 3u) == HAL_OK) {
                 if (count < max) found[count] = (uint8_t)addr;
                 ++count;
             }
