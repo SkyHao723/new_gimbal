@@ -365,8 +365,7 @@ void imu_bus_diag(void)
     bus_diag[7] = I2C1->TIMINGR;
 }
 
-void imu_bus_diag_scan_result(int found_count, const uint8_t *found)
-{
+void imu_bus_diag_scan_result(int found_count, const uint8_t *found){
     bus_diag[4] = (found_count > 0) ? (uint32_t)found_count : 0u;
     if (found_count > 0) {
         uint32_t v = (uint32_t)found[0];
@@ -378,3 +377,30 @@ void imu_bus_diag_scan_result(int found_count, const uint8_t *found)
     bus_diag[6] = I2C1->ISR;
     bus_diag[7] = I2C1->TIMINGR;
 }
+
+#if HOST_I2C_PIN_DRIVE_TEST
+/* Hardware check aid: drive PB6/PB7 as plain push-pull outputs, 5 s low then
+ * 5 s high, forever. Measure the IMU SDA/SCL pins with a multimeter: if the
+ * voltage follows, the connection MCU -> IMU is good; if it stays fixed, the
+ * net / solder joint is broken. */
+void imu_i2c_pin_drive_test(void)
+{
+    uint32_t m;
+
+    RCC->AHB2ENR |= RCC_AHB2ENR_GPIOBEN;
+    (void)RCC->AHB2ENR;
+    m = GPIOB->MODER;
+    m &= ~(GPIO_MODER_MODE6 | GPIO_MODER_MODE7);
+    m |= (1u << GPIO_MODER_MODE6_Pos) | (1u << GPIO_MODER_MODE7_Pos);
+    GPIOB->MODER = m;
+    GPIOB->OTYPER &= ~(GPIO_OTYPER_OT6 | GPIO_OTYPER_OT7);        /* push-pull */
+    GPIOB->PUPDR &= ~(GPIO_PUPDR_PUPD6 | GPIO_PUPDR_PUPD7);
+
+    for (;;) {
+        GPIOB->BSRR = GPIO_BSRR_BR6 | GPIO_BSRR_BR7;              /* both LOW  */
+        HAL_Delay(5000u);
+        GPIOB->BSRR = GPIO_BSRR_BS6 | GPIO_BSRR_BS7;              /* both HIGH */
+        HAL_Delay(5000u);
+    }
+}
+#endif

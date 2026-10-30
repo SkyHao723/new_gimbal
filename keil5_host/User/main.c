@@ -65,6 +65,11 @@ static void imu_bringup(void)
        内部会顺带做 9 个时钟的总线解锁并初始化 I2C1 */
     imu_bus_diag();
 
+#if HOST_I2C_PIN_DRIVE_TEST
+    printf("[I2C] PIN DRIVE TEST: PB6/PB7 push-pull, 5 s low / 5 s high (measure IMU side)\r\n");
+    imu_i2c_pin_drive_test();          /* never returns */
+#endif
+
     printf("\r\n[I2C] scanning 0x08..0x77 ...\r\n");
     printf("[I2C] bus levels  pu=%02lX pd=%02lX clear=%02lX\r\n",
            (unsigned long)bus_diag[0], (unsigned long)bus_diag[1], (unsigned long)bus_diag[3]);

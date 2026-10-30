@@ -2,6 +2,7 @@
 #define HOST_ICM42670_H
 
 #include <stdint.h>
+#include "host_config.h"
 
 /* ICM-42670-P（六轴 IMU）走 I2C1：PB6=SCL / PB7=SDA，AF4，开漏。
    寄存器按 bank0 直接读，没做 FIFO / 中断，够点板和后续姿态解算用。 */
@@ -46,5 +47,8 @@ extern volatile uint32_t bus_diag[8];
 extern volatile uint32_t sw_scan[4];
 void imu_bus_diag(void);
 void imu_bus_diag_scan_result(int found_count, const uint8_t *found);
+#if HOST_I2C_PIN_DRIVE_TEST
+void imu_i2c_pin_drive_test(void);
+#endif
 
 #endif
