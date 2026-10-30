@@ -153,3 +153,76 @@ IMU acc[g] 0.000 -0.056 1.022   gyro[dps] -0.5 -0.1 0.7   temp 25.7 C
 - 新增 `t` 命令做压力测试（200 次读，报成功率/单次耗时/上限频率）
 
 **对三块驱动板的启示**：它们的 AS5600 也接在 PB6/PB7 上，之前"硬件 I2C 不通、改用软件 I2C"其实是**唯一正确解**，不是将就。以后新板若想用硬件 I2C，请把 SCL/SDA 放到 **PB8/PB9**（或 PA13/PA15 + PA14）。
+
+
+## 2026-10-30: two command inputs (CH343P USB + ESP32)
+
+The host board accepts commands from **two** independent inputs. They are not
+used at the same time; whichever side delivers a complete line first is
+executed, and **the reply goes back only to the side that asked**. Boot banner
+and asynchronous logs still go to both.
+
+| Input | Pins | Driver | Notes |
+| --- | --- | --- | --- |
+| USB (CH343P) | PA9/PA10, USART1 | BSP/console.c | printf is routed here |
+| ESP32-S3 | PA2/PA3, USART2 | BSP/esp_link.c | 115200 8N1, RX ring buffer |
+
+Output routing API (in console.h): console_set_route(CONSOLE_OUT_USB),
+CONSOLE_OUT_ESP, CONSOLE_OUT_BOTH; console_route() reads it back.
+putc()/printf() follow the route, so a command handler never has to care
+where the text goes.
+
+### ESP lines must start with @
+
+Lines arriving on UART2 are only executed when they start with @:
+
+`
+@m            read IMU
+@b            board status
+@c1 T0.5      send T0.5 to CAN node 1
+`
+
+Everything else is counted and dropped (ignored= in ). This is not
+paranoia - during bring-up the ESP32 side was dumping a continuous ASCII
+stream into PA3 at ~115200; without the @ gate those bytes were parsed as
+commands (more than 1000 commands in two seconds) and the replies fed back
+into the loop. The ESP32 firmware must therefore prefix every command with
+@.
+
+### Noise guard
+
+esp_link_guard() runs once per main-loop pass. A real operator cannot type
+more than ~1.5 kB/s, so if the measured rate exceeds that for a 500 ms window
+the ESP input is **muted for 5 s** and a warning is printed on the USB side:
+
+`
+[ESP-LINK] noisy input (>3 kB/s) - ESP input muted for 5 s; check PA2/PA3 wiring
+`
+
+ shows the live counters: 
+x=, ad=<lines>/<bytes>, ignored=,
+dropped=, plus muted= / muted_drops=.
+
+### e self-test
+
+e prints the UART2 configuration and counters, then runs a pin-level test:
+it takes PA2/PA3 over as GPIO, reads the idle levels, drives PA2 low and high
+while watching PA3. Interpretation:
+
+| Observation | Meaning |
+| --- | --- |
+| PA3 follows PA2 | TX and RX are wired together, or the ESP32 ties them |
+| PA3 idles low | something is holding the line low / ESP32 TX stuck |
+| PA3 idles high, does not follow | wiring looks sane |
+
+Measured on the board with the ESP32 side spamming: idle PA2=1 PA3=1,
+PA2 low -> PA3=1, PA2 high -> PA3=1, 
+x growing ~15 kB/s, commands ESP=0
+(the gate works), muted=1.
+
+### Known state
+
+* USB input path: verified (commands: USB= increments, UART1 dropped=0).
+* ESP input path: framing + routing + guards verified, but **cannot be
+  verified end-to-end until the ESP32 firmware sends @-prefixed lines** and
+  the continuous junk stream on PA3 is explained (see e output).

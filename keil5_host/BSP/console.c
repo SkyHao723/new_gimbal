@@ -1,6 +1,7 @@
 #include "stm32g4xx_hal.h"
 #include "console.h"
 #include "host_config.h"
+#include "esp_link.h"
 #include <stdio.h>
 
 /* USART1 直接写寄存器：上位机板只需要一条调试串口，用 HAL 的 UART 驱动会多带
@@ -15,6 +16,35 @@ static volatile uint16_t rx_head, rx_tail;
 static volatile uint32_t rx_dropped;
 static char line_buf[LINE_MAX];
 static uint32_t line_len;
+static volatile int out_route = CONSOLE_OUT_BOTH;
+
+/* Write one byte to the selected sink(s). ESP is skipped until esp_link_init()
+   has run, so an early failure cannot hang on a disabled USART2. */
+static void console_put_byte(char ch)
+{
+    int to_esp = (out_route & CONSOLE_OUT_ESP) != 0;
+    int to_usb = (out_route & CONSOLE_OUT_USB) != 0;
+
+    if (to_esp && !esp_link_ready()) {          /* fall back so nothing is lost */
+        to_esp = 0;
+        to_usb = 1;
+    }
+    if (to_usb) {
+        while (!(USART1->ISR & USART_ISR_TXE)) { }
+        USART1->TDR = (uint8_t)ch;
+    }
+    if (to_esp) esp_link_putc(ch);
+}
+
+void console_set_route(int route)
+{
+    out_route = (route == CONSOLE_OUT_USB || route == CONSOLE_OUT_ESP) ? route : CONSOLE_OUT_BOTH;
+}
+
+int console_route(void)
+{
+    return out_route;
+}
 
 static void console_usart_init(uint32_t baud)
 {
@@ -103,10 +133,7 @@ int console_read_line(char *line, uint32_t size)
 
 void console_puts(const char *text)
 {
-    while (*text) {
-        while (!(USART1->ISR & USART_ISR_TXE)) { }
-        USART1->TDR = (uint8_t)*text++;
-    }
+    while (*text) console_put_byte(*text++);
 }
 
 uint32_t console_dropped_bytes(void)
@@ -118,7 +145,6 @@ uint32_t console_dropped_bytes(void)
 int fputc(int ch, FILE *stream)
 {
     (void)stream;
-    while (!(USART1->ISR & USART_ISR_TXE)) { }
-    USART1->TDR = (uint8_t)ch;
+    console_put_byte((char)ch);
     return ch;
 }

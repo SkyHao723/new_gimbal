@@ -484,6 +484,11 @@
               <FileType>1</FileType>
               <FilePath>.\BSP\console.c</FilePath>
             </File>
+<File>
+              <FileName>esp_link.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\BSP\esp_link.c</FilePath>
+            </File>
             <File>
               <FileName>icm42670.c</FileName>
               <FileType>1</FileType>

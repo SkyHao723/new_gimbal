@@ -13,4 +13,11 @@ int console_read_line(char *line, uint32_t size);
 void console_flush_input(void);
 uint32_t console_dropped_bytes(void);
 
+/* Output routing: replies go back to the link the request came from.
+   CONSOLE_OUT_BOTH is the default (boot banner and asynchronous logs). */
+#define CONSOLE_OUT_USB  1
+#define CONSOLE_OUT_ESP  2
+#define CONSOLE_OUT_BOTH 3
+void console_set_route(int route);
+int  console_route(void);
 #endif

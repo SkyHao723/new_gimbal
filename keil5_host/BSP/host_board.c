@@ -43,26 +43,3 @@ void SysTick_Handler(void)
 {
     HAL_IncTick();
 }
-
-void host_esp_uart_init(uint32_t baud)
-{
-    GPIO_InitTypeDef gpio = {0};
-    uint32_t pclk1 = HAL_RCC_GetPCLK1Freq();
-
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    __HAL_RCC_USART2_CLK_ENABLE();
-
-    /* PA2 = USART2_TX (AF7), PA3 = USART2_RX (AF7) */
-    gpio.Pin = GPIO_PIN_2 | GPIO_PIN_3;
-    gpio.Mode = GPIO_MODE_AF_PP;
-    gpio.Pull = GPIO_PULLUP;
-    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
-    gpio.Alternate = GPIO_AF7_USART2;
-    HAL_GPIO_Init(GPIOA, &gpio);
-
-    USART2->CR1 = 0u;
-    USART2->CR2 = 0u;
-    USART2->CR3 = 0u;
-    USART2->BRR = (uint16_t)((pclk1 + baud / 2u) / baud);
-    USART2->CR1 = USART_CR1_UE | USART_CR1_TE | USART_CR1_RE;   /* 先不收，避免噪声字节 */
-}

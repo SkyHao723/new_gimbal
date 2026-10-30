@@ -20,6 +20,7 @@
 #include "stm32g4xx_hal.h"
 #include "clock.h"
 #include "console.h"
+#include "esp_link.h"
 #include "host_board.h"
 #include "host_config.h"
 #include "can_host.h"
@@ -28,6 +29,8 @@
 #include <string.h>
 
 static ImuInfo imu;
+static uint32_t cmd_from_usb;
+static uint32_t cmd_from_esp;
 
 static void print_banner(void)
 {
@@ -35,7 +38,8 @@ static void print_banner(void)
     printf("SYSCLK=%lu Hz  HCLK=%lu  PCLK1=%lu  PCLK2=%lu\r\n",
            (unsigned long)HAL_RCC_GetSysClockFreq(), (unsigned long)HAL_RCC_GetHCLKFreq(),
            (unsigned long)HAL_RCC_GetPCLK1Freq(), (unsigned long)HAL_RCC_GetPCLK2Freq());
-    printf("UART1 PA9/PA10 <-> CH343P @ %lu 8N1\r\n", (unsigned long)HOST_CONSOLE_BAUD);
+    printf("UART1 PA9/PA10 <-> CH343P @ %lu 8N1   (command input A)\r\n", (unsigned long)HOST_CONSOLE_BAUD);
+    printf("UART2 PA2/PA3  <-> ESP32-S3 @ %lu 8N1   (command input B)\r\n", (unsigned long)HOST_ESP_BAUD);
     printf("GPIO-I2C PB6/PB7 -> ICM-42670-P   FDCAN1 PB8/PB9 @ 500k   LED PA5\r\n");
     printf("Type h for the command list\r\n");
 }
@@ -180,26 +184,79 @@ static void imu_stress(void)
            cycles / (HAL_RCC_GetHCLKFreq() / 1000000u) / 200.0f,
            200.0f * (float)HAL_RCC_GetHCLKFreq() / (float)cycles);
 }
+/* 'e': ESP32 link self-test. Half-duplex mode connects TX back into RX inside
+   the UART, so the whole path (TX -> line -> RX interrupt -> ring -> line
+   assembly) can be verified without the ESP32 being programmed yet. Replies are
+   routed to USB during the test so the echoed text cannot loop forever. */
+static void esp_link_selftest(void)
+{
+    char buf[32];
+    int saved_route, got = 0;
+    uint32_t t0;
+
+    uint32_t pins[4];
+
+    printf("ESP link: UART2 PA2=TX PA3=RX @ %lu 8N1  ready=%d rx=%lu bad=%lu/%lu ignored=%lu dropped=%lu\r\n",
+           (unsigned long)HOST_ESP_BAUD, esp_link_ready(),
+           (unsigned long)esp_link_rx_bytes(),
+           (unsigned long)esp_link_bad_lines(), (unsigned long)esp_link_bad_bytes(),
+           (unsigned long)esp_link_ignored_lines(), (unsigned long)esp_link_dropped_bytes());
+
+    esp_link_pin_test(pins);
+    printf("[ESP-PINS] idle PA2=%lu PA3=%lu | PA2 low -> PA3=%lu | PA2 high -> PA3=%lu\r\n",
+           (unsigned long)pins[0], (unsigned long)pins[1],
+           (unsigned long)pins[2], (unsigned long)pins[3]);
+    if (pins[2] == 0u && pins[3] == 1u)
+        printf("[ESP-PINS] PA3 follows PA2 -> TX and RX are wired together (check ESP32 side)\r\n");
+    else if (pins[1] == 0u)
+        printf("[ESP-PINS] PA3 idles low -> external driver pulling it down / ESP32 TX stuck\r\n");
+    else
+        printf("[ESP-PINS] PA3 idles high and does not follow PA2 -> wiring looks sane\r\n");
+
+    saved_route = console_route();
+    console_set_route(CONSOLE_OUT_USB);
+    USART2->CR3 |= USART_CR3_HDSEL;              /* internal TX -> RX loopback */
+    esp_link_flush_input();
+    esp_link_puts("hw\r\n");
+    t0 = HAL_GetTick();
+    while ((HAL_GetTick() - t0) < 50u) {
+        if (esp_link_read_line(buf, sizeof(buf))) { got = 1; break; }
+    }
+    USART2->CR3 &= ~USART_CR3_HDSEL;
+    esp_link_flush_input();
+    console_set_route(saved_route);
+
+    if (got && !strcmp(buf, "hw")) printf("[ESP-LINK] loopback OK (UART2 path works)\r\n");
+    else printf("[ESP-LINK] loopback FAIL (got '%s')\r\n", got ? buf : "");
+}
 static void print_status(void)
 {
     printf("SYSCLK=%lu  CAN PSR=0x%08lX ECR=0x%08lX rx=%lu busoff=%lu txdrop=%lu\r\n",
            (unsigned long)HAL_RCC_GetSysClockFreq(), (unsigned long)can_host_psr(),
            (unsigned long)can_host_error_count(), (unsigned long)can_host_rx_count(),
            (unsigned long)can_host_bus_off_count(), (unsigned long)can_host_tx_dropped());
-    printf("UART1 dropped bytes=%lu  IMU addr=0x%02X\r\n",
-           (unsigned long)console_dropped_bytes(), imu.address ? imu.address : 0u);
+    printf("UART1 dropped=%lu  UART2(ESP) dropped=%lu rx=%lu bad=%lu/%lu  IMU addr=0x%02X\r\n",
+           (unsigned long)console_dropped_bytes(), (unsigned long)esp_link_dropped_bytes(),
+           (unsigned long)esp_link_rx_bytes(), (unsigned long)esp_link_bad_lines(),
+           (unsigned long)esp_link_bad_bytes(), imu.address ? imu.address : 0u);
+    printf("commands: USB=%lu  ESP=%lu  reply route=%d (1=USB 2=ESP 3=both)\r\n",
+           (unsigned long)cmd_from_usb, (unsigned long)cmd_from_esp, console_route());
+    printf("ESP input: only lines starting with '@' are executed (e.g. @m, @c1 T0.5); muted=%d muted_drops=%lu\r\n",
+           esp_link_muted(), (unsigned long)esp_link_muted_drops());
 }
 
-static void handle_command(char *line)
+static void handle_command_body(char *line)
 {
     if (!strcmp(line, "h") || !strcmp(line, "?")) {
-        printf("h/?: help   i: I2C scan   m: read IMU   t: IMU stress (200 reads)   n: poll drivers   b: status   l: LED\r\n");
+        printf("h/?: help   i: I2C scan   m: read IMU   t: IMU stress   e: ESP link self-test   n: poll drivers   b: status   l: LED\r\n");
+        printf("commands are accepted on BOTH inputs: UART1 (CH343P USB) and UART2 (ESP32); reply goes back to the source\r\n");
         printf("c<N> <cmd>: send to node N, e.g. c1 T0.5 / c2 M1 / c0 V2.5 (c0 = broadcast)\r\n");
         return;
     }
     if (!strcmp(line, "i")) { imu_bringup(); return; }
     if (!strcmp(line, "m")) { report_imu(); return; }
     if (!strcmp(line, "t")) { imu_stress(); return; }
+    if (!strcmp(line, "e")) { esp_link_selftest(); return; }
     if (!strcmp(line, "n")) { can_scan_drivers(); return; }
     if (!strcmp(line, "b")) { print_status(); return; }
     if (!strcmp(line, "l")) { host_led_toggle(); printf("LED toggled\r\n"); return; }
@@ -212,10 +269,21 @@ static void handle_command(char *line)
     printf("unknown command, type h\r\n");
 }
 
+/* Executes one command line. `from_esp` selects where the reply goes so that
+   the two links never see each other's traffic (they are not used together). */
+static void handle_command(char *line, int from_esp)
+{
+    if (from_esp) ++cmd_from_esp; else ++cmd_from_usb;
+    console_set_route(from_esp ? CONSOLE_OUT_ESP : CONSOLE_OUT_USB);
+    handle_command_body(line);
+    console_set_route(CONSOLE_OUT_BOTH);
+}
+
 int main(void)
 {
     char line[64];
     uint32_t next_blink, next_service;
+    int guard;
 
     if (!clock_init()) {
         for (;;) { }                       /* clock failed: stay here for the debugger */
@@ -225,8 +293,8 @@ int main(void)
     host_led(1);
     print_banner();
 
-    host_esp_uart_init(HOST_ESP_BAUD);
-    printf("[UART2] PA2/PA3 initialised @ %lu (ESP32 protocol deferred)\r\n",
+    esp_link_init(HOST_ESP_BAUD);
+    printf("[UART2] PA2/PA3 command input ready @ %lu (second input, ESP32 bridging deferred)\r\n",
            (unsigned long)HOST_ESP_BAUD);
 
     imu_bringup();
@@ -237,7 +305,15 @@ int main(void)
     next_service = HAL_GetTick();
     for (;;) {
         uint32_t now = HAL_GetTick();
-        if (console_read_line(line, sizeof(line))) handle_command(line);
+        if (console_read_line(line, sizeof(line))) handle_command(line, 0);
+        guard = esp_link_guard(HAL_GetTick());
+        if (guard == 2) {
+            int saved = console_route();
+            console_set_route(CONSOLE_OUT_USB);
+            printf("[ESP-LINK] noisy input (>3 kB/s) - ESP input muted for 5 s; check PA2/PA3 wiring\r\n");
+            console_set_route(saved);
+        }
+        if (!guard && esp_link_read_line(line, sizeof(line))) handle_command(line, 1);
         if (now >= next_service) { can_host_service(); next_service = now + 20u; }
         if (now >= next_blink) {
             host_led_toggle();
