@@ -114,3 +114,9 @@ G431 那边的规则（见 `../keil5_host/README.md`）：
 ### 5.5 板载 USB 桥芯片占着 UART0
 
 部分 ESP32 板子用 UART0 接板载 USB 转串口芯片。这种情况下把文件顶部 `G431_UART_NUM` 改成 `1`（或 `2`），并把 `G431_TX_PIN` / `G431_RX_PIN` 改成你实际接线的两个 GPIO。
+
+### 5.6 串口日志里出现 E (115159) uart: uart_read_bytes(...): uart driver error
+
+这是 ESP-IDF 的驱动提示：在 UART 驱动被 end() 之后又有一次读操作落到同一 UART 上。早期的桥接了
+link_watchdog 里会 end() 后再 egin()，中间的读就会打出这条错误。现在已改为**驱动只安装、从不
+end()**，这条日志不会再出现。看到历史日志可以直接忽略，不影响功能。

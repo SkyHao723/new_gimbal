@@ -95,6 +95,7 @@ static HardwareSerial uart0(0);
 static HardwareSerial uart1(1);
 static HardwareSerial uart2(2);
 static HardwareSerial *g431 = nullptr;   /* the link that answered */
+static int g431_num = -1;                /* its UART number, for diagnostics */
 
 static char usb_line[LINE_MAX];
 static uint32_t usb_line_len;
@@ -248,9 +249,10 @@ static void g431_begin(HardwareSerial *port, int tx_pin, int rx_pin)
     port->setTimeout(50);
 }
 
-static void g431_link_up(HardwareSerial *port)
+static void g431_link_up(HardwareSerial *port, int num)
 {
     g431 = port;
+    g431_num = num;
     g431_line_len = 0u;
     g431_crlf_skip = 0u;
 }
@@ -305,9 +307,7 @@ static bool probe_one(uint8_t num, int tx_pin, int rx_pin, char *first_line, uin
         delay(1);
     }
     g431_line_len = 0u;
-    if (!ok) {
-        port->end();
-    }
+    (void)ok;
     return ok;
 }
 
@@ -323,7 +323,7 @@ static void probe_all(void)
         if (probe_one(num, G431_TX_PIN, G431_RX_PIN, line, sizeof(line))) {
             usb_printf("[probe] UART%u default pins : OK  \"%s\"\r\n", num, line);
             if (!found) {
-                g431_link_up(uart_by_num(num));
+                g431_link_up(uart_by_num(num), (int)num);
                 found = true;
             }
         } else {
@@ -363,8 +363,9 @@ static void print_stat(void)
 {
     usb_printf("\r\n[stat] fw=" FW_VERSION " chip=%s usb_cdc=%d\r\n",
                ESP.getChipModel(), USB_IS_CDC);
-    usb_printf("[stat] g431 link=%s  baud=%d  raw=%d\r\n",
-               (g431 == nullptr) ? "DOWN" : "UP", G431_BAUD, raw_mode ? 1 : 0);
+    usb_printf("[stat] g431 link=%s (UART%d, TX=%d RX=%d) baud=%d raw=%d\r\n",
+               (g431 == nullptr) ? "DOWN" : "UP", g431_num, G431_TX_PIN, G431_RX_PIN,
+               G431_BAUD, raw_mode ? 1 : 0);
     usb_printf("[stat] cmds=%lu  replies=%lu  usb_bytes=%lu  g431_bytes=%lu\r\n",
                (unsigned long)stat_usb_cmds, (unsigned long)stat_g431_lines,
                (unsigned long)stat_usb_bytes, (unsigned long)stat_g431_bytes);
@@ -480,7 +481,7 @@ void setup(void)
     port = uart_by_num((uint8_t)G431_UART_NUM);
     if (port != nullptr) {
         g431_begin(port, G431_TX_PIN, G431_RX_PIN);
-        g431_link_up(port);
+        g431_link_up(port, (int)G431_UART_NUM);
     }
 
     delay(50);
@@ -517,7 +518,6 @@ static void link_watchdog(void)
         if (last_reply_ms != 0u && (uint32_t)(millis() - last_reply_ms) > 15000u) {
             usb_write("[bridge] link silent for >15 s, re-checking\r\n");
             g431 = nullptr;
-            uart_by_num((uint8_t)G431_UART_NUM)->end();
         } else {
             return;
         }
@@ -528,10 +528,12 @@ static void link_watchdog(void)
         g431_begin(port, G431_TX_PIN, G431_RX_PIN);
         delay(20);
         if (g431_ask("?", reply, sizeof(reply), 300u)) {
-            g431_link_up(port);
+            g431_link_up(port, (int)G431_UART_NUM);
             usb_printf("[bridge] link recovered: \"%s\"\r\n", reply);
         } else {
-            port->end();
+            /* Do not end() the UART: a read that lands between end() and the
+               next begin() makes ESP-IDF log "uart driver error". */
+            g431 = nullptr;
         }
     }
 }
