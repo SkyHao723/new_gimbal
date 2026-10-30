@@ -79,12 +79,17 @@
 #define PROBE_TIMEOUT_MS 300   /* wait for a reply while probing */
 #define HEX_DUMP_MAX 24        /* bytes per !raw line */
 #define LINK_RETRY_MS 5000u    /* re-check the link when it looks down */
+#define KEEPALIVE_MS  5000u    /* ping the G431 when the link has been idle */
 #define BRIDGE_SET_USB_TIMEOUT 1 /* set to 0 if setTxTimeoutMs() is missing */
 
 #if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
 #define USB_IS_CDC 1
 #else
 #define USB_IS_CDC 0
+#endif
+
+#if !USB_IS_CDC && (G431_UART_NUM == 0)
+#warning "USB CDC On Boot is Disabled: Serial occupies UART0, which conflicts with the G431 link. Enable USB CDC On Boot (CDCOnBoot=cdc) or set G431_UART_NUM to 1/2."
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -114,6 +119,10 @@ static uint32_t stat_crlf;
 static uint32_t stat_local;
 static uint32_t last_reply_ms;
 static uint32_t ping_sent_ms;
+static uint32_t last_tx_ms;              /* last time we sent anything to the G431 */
+static bool link_ok = true;              /* last keepalive / exchange succeeded */
+static bool suppress_output;             /* swallow the next reply lines */
+static bool announced_down;              /* avoid repeating the warning */
 
 /* ------------------------------------------------------------------ */
 /* tiny USB console helpers                                            */
@@ -165,6 +174,7 @@ static void g431_send_command(const char *text)
     g431->write((const uint8_t *)text, n);
     g431->write('\r');
     g431->write('\n');
+    last_tx_ms = millis();
     ++stat_usb_cmds;
 }
 
@@ -197,8 +207,11 @@ static bool g431_poll(char *out, uint32_t out_size)
                 }
                 ++stat_g431_lines;
                 last_reply_ms = millis();
+                link_ok = true;
                 got = true;
-                if (!raw_mode) {
+                if (suppress_output) {
+                    /* keepalive reply: consume it silently */
+                } else if (!raw_mode) {
                     usb_write(g431_line);
                     usb_write("\r\n");
                 } else {
@@ -373,9 +386,11 @@ static void print_stat(void)
                (unsigned long)stat_dropped, (unsigned long)stat_local,
                (unsigned long)(last_reply_ms == 0u ? 0u : (millis() - last_reply_ms)));
     if (g431 == nullptr) {
-        usb_write("[stat] no link - run !probe\r\n");
-    } else if (last_reply_ms == 0u || (uint32_t)(millis() - last_reply_ms) > 5000u) {
-        usb_write("[stat] link silent for >5 s - is the G431 running?\r\n");
+        usb_write("[stat] link DOWN - re-armed on the next command / keepalive\r\n");
+    } else if (!link_ok) {
+        usb_write("[stat] link WARN - last keepalive got no reply\r\n");
+    } else {
+        usb_printf("[stat] link OK  keepalive=%lu ms\r\n", (unsigned long)KEEPALIVE_MS);
     }
 }
 
@@ -433,11 +448,22 @@ static void usb_handle_byte(uint8_t b)
             usb_line[usb_line_len] = 0;
             if (usb_line[0] == '!') {
                 handle_local(usb_line);
-            } else if (g431 == nullptr) {
-                usb_printf("[bridge] no G431 link - command '%s' dropped (try !probe)\r\n",
-                           usb_line);
             } else {
-                g431_send_command(usb_line);
+                if (g431 == nullptr) {
+                    /* Never throw user input away because a keepalive was
+                       missed: re-arm the link and forward the command. */
+                    HardwareSerial *port = uart_by_num((uint8_t)G431_UART_NUM);
+                    if (port != nullptr) {
+                        g431_begin(port, G431_TX_PIN, G431_RX_PIN);
+                        delay(10);
+                        g431_link_up(port, (int)G431_UART_NUM);
+                    }
+                }
+                if (g431 == nullptr) {
+                    usb_printf("[bridge] no G431 link - command '%s' dropped\r\n", usb_line);
+                } else {
+                    g431_send_command(usb_line);
+                }
             }
             usb_line_len = 0u;
         }
@@ -505,36 +531,53 @@ void setup(void)
     usb_write("[esp32] ready - type !help for commands\r\n");
 }
 
-/* When the link looks down, try to bring it back. The G431 may have been
- * reset (brown-out, firmware flash) while the ESP32 kept running. */
-static void link_watchdog(void)
+/* Keep the link healthy without ever dropping it. An idle link is normal
+ * (the G431 only talks when spoken to), so silence is checked with an active
+ * keepalive instead of being treated as failure. A missed reply only marks
+ * link_ok=false: the next command is still forwarded, and the next keepalive
+ * re-checks. This also fixes the old bug where g431 was nulled and the
+ * recovery path could never send anything (g431_send_command drops on null). */
+static void link_maintain(void)
 {
-    static uint32_t next_try_ms;
+    static uint32_t next_ms;
+    HardwareSerial *port = uart_by_num((uint8_t)G431_UART_NUM);
+    char reply[LINE_MAX];
+    bool ok;
 
-    if ((int32_t)(millis() - next_try_ms) < 0) return;
-    next_try_ms = millis() + LINK_RETRY_MS;
+    if (port == nullptr) return;
+    if ((int32_t)(millis() - next_ms) < 0) return;
+    next_ms = millis() + KEEPALIVE_MS;
 
-    if (g431 != nullptr) {
-        if (last_reply_ms != 0u && (uint32_t)(millis() - last_reply_ms) > 15000u) {
-            usb_write("[bridge] link silent for >15 s, re-checking\r\n");
-            g431 = nullptr;
-        } else {
-            return;
-        }
-    }
-    {
-        HardwareSerial *port = uart_by_num((uint8_t)G431_UART_NUM);
-        char reply[LINE_MAX];
+    if (g431 == nullptr) {
         g431_begin(port, G431_TX_PIN, G431_RX_PIN);
-        delay(20);
-        if (g431_ask("?", reply, sizeof(reply), 300u)) {
-            g431_link_up(port, (int)G431_UART_NUM);
-            usb_printf("[bridge] link recovered: \"%s\"\r\n", reply);
-        } else {
-            /* Do not end() the UART: a read that lands between end() and the
-               next begin() makes ESP-IDF log "uart driver error". */
-            g431 = nullptr;
+        delay(10);
+        g431_link_up(port, (int)G431_UART_NUM);
+    }
+
+    /* Traffic just happened -> the link is evidently alive, skip the ping. */
+    if (last_tx_ms != 0u && (uint32_t)(millis() - last_tx_ms) < KEEPALIVE_MS) {
+        link_ok = true;
+        if (announced_down) {
+            usb_write("[bridge] link recovered\r\n");
+            announced_down = false;
         }
+        return;
+    }
+
+    suppress_output = true;
+    ok = g431_ask("R", reply, sizeof(reply), 300u);
+    suppress_output = false;
+    link_ok = ok;
+
+    if (ok) {
+        if (announced_down) {
+            usb_write("[bridge] link recovered\r\n");
+            announced_down = false;
+        }
+    } else if (!announced_down) {
+        usb_printf("[bridge] G431 not answering on UART%d (check TX/RX wiring and G431 power)\r\n",
+                   G431_UART_NUM);
+        announced_down = true;
     }
 }
 
@@ -546,6 +589,6 @@ void loop(void)
         usb_handle_byte((uint8_t)v);
     }
     g431_poll(nullptr, 0u);
-    link_watchdog();
+    link_maintain();
     delay(1);
 }
