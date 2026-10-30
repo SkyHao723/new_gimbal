@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>上位机板 串口控制台</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1e232c; --line: #2a3140;
+    --text: #d7dee9; --dim: #8894a6; --accent: #4da3ff; --ok: #35c46a;
+    --warn: #e0a800; --err: #ff5d5d; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+           background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 600; letter-spacing: .3px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #555; display: inline-block; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .pill { font-size: 12px; color: var(--dim); border: 1px solid var(--line);
+          border-radius: 999px; padding: 2px 10px; }
+  button { font: inherit; color: var(--text); background: var(--panel2);
+           border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #12395e; border-color: #1d5c96; }
+  button.danger  { background: #4a1d1d; border-color: #7d2a2a; }
+  button.mini { padding: 3px 9px; font-size: 12.5px; border-radius: 7px; }
+  main { display: grid; grid-template-columns: minmax(420px, 1.15fr) minmax(360px, .85fr);
+         gap: 12px; padding: 12px; align-items: start; }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+           overflow: hidden; }
+  .panel > h2 { margin: 0; padding: 9px 12px; font-size: 13px; font-weight: 600;
+                color: var(--dim); border-bottom: 1px solid var(--line);
+                display: flex; justify-content: space-between; align-items: center; }
+  .panel .body { padding: 10px 12px; }
+  #term { height: 46vh; min-height: 260px; overflow-y: auto; padding: 8px 10px;
+          background: #0b0d11; font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap;
+          word-break: break-all; }
+  #term div { padding: 1px 0; }
+  .tx { color: #6ea8ff; } .rx { color: #cfe0f5; } .err { color: var(--err); }
+  .warn { color: var(--warn); } .info { color: var(--dim); } .ok { color: var(--ok); }
+  .cmdline { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .cmdline input { flex: 1; font: inherit; font-family: var(--mono); color: var(--text);
+                   background: #0b0d11; border: 1px solid var(--line); border-radius: 8px;
+                   padding: 8px 10px; outline: none; }
+  .cmdline input:focus { border-color: var(--accent); }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .row:last-child { margin-bottom: 0; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-family: var(--mono);
+        font-size: 12.5px; }
+  .kv b { color: var(--dim); font-weight: 500; }
+  .big { font-family: var(--mono); font-size: 20px; }
+  .muted { color: var(--dim); font-size: 12px; }
+  .nodecards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  @media (max-width: 640px) { .nodecards { grid-template-columns: 1fr; } }
+  .node { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+  .node h3 { margin: 0 0 6px; font-size: 12.5px; display: flex; justify-content: space-between;
+             align-items: center; color: var(--dim); font-weight: 600; }
+  .node .val { font-family: var(--mono); font-size: 12.5px; }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); }
+  .badge.on { color: #0d1a10; background: var(--ok); border-color: var(--ok); }
+  .badge.off { color: var(--dim); }
+  .badge.fault { color: #2a0b0b; background: var(--err); border-color: var(--err); }
+  select, input.num { font: inherit; font-family: var(--mono); color: var(--text);
+                      background: #0b0d11; border: 1px solid var(--line); border-radius: 7px; padding: 5px 7px; }
+  input.num { width: 92px; }
+  label.chk { display: flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--dim); }
+  .sep { height: 1px; background: var(--line); margin: 10px 0; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>上位机板 · 有线串口控制</h1>
+  <span class="pill" id="portInfo">未连接</span>
+  <span class="pill">WS-CDC · CH343P</span>
+  <span style="flex:1"></span>
+  <label class="muted">波特率
+    <input class="num" id="baud" value="115200" style="width:84px" />
+  </label>
+  <button class="primary" id="btnConnect">连接串口</button>
+  <button class="danger" id="btnDisconnect" disabled>断开</button>
+</header>
+
+<main>
+  <!-- 左：终端 -->
+  <section class="panel">
+    <h2>终端
+      <span>
+        <label class="chk"><input type="checkbox" id="autoScroll" checked /> 自动滚动</label>
+        <button class="mini" id="btnClear">清屏</button>
+        <button class="mini" id="btnSave">导出日志</button>
+      </span>
+    </h2>
+    <div id="term"></div>
+    <div class="cmdline">
+      <input id="input" placeholder="输入命令，回车发送（↑↓ 翻历史）。例：b / m / n / c1 T0.5" disabled />
+      <button id="btnSend" disabled>发送</button>
+    </div>
+  </section>
+
+  <!-- 右：状态与控制 -->
+  <div style="display:grid; gap:12px">
+    <section class="panel">
+      <h2>一键操作</h2>
+      <div class="body">
+        <div class="row">
+          <button class="mini" data-cmd="h">帮助 h</button>
+          <button class="mini" data-cmd="b">板级状态 b</button>
+          <button class="mini" data-cmd="m">读 IMU m</button>
+          <button class="mini" data-cmd="n">广播巡检 n</button>
+          <button class="mini" data-cmd="l">翻灯 l</button>
+        </div>
+        <div class="sep"></div>
+        <div class="row">
+          <button class="mini" data-cmd="c1 ?">1 号板状态</button>
+          <button class="mini" data-cmd="c2 ?">2 号板状态</button>
+          <button class="mini" data-cmd="c3 ?">3 号板状态</button>
+          <button class="mini" data-cmd="c0 ?">全部状态</button>
+        </div>
+        <div class="row">
+          <label class="chk"><input type="checkbox" id="autoPoll" /> 每 2 秒自动刷新三块板</label>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>下发指令</h2>
+      <div class="body">
+        <div class="row">
+          <select id="nodeSel">
+            <option value="0">广播 0</option>
+            <option value="1" selected>1 号板</option>
+            <option value="2">2 号板</option>
+            <option value="3">3 号板</option>
+          </select>
+          <select id="opSel">
+            <option value="T">T 目标角 (rad)</option>
+            <option value="V">V 电压上限 (V)</option>
+            <option value="L">L 速度上限 (rad/s)</option>
+            <option value="M">M 运动模式 (0/1)</option>
+          </select>
+          <input class="num" id="opVal" value="0.5" />
+          <button class="primary" id="btnOpSend">发送</button>
+        </div>
+        <div class="row">
+          <span class="muted" style="align-self:center">快捷：</span>
+          <button class="mini" data-cmd="c0 E">全部使能 E</button>
+          <button class="mini" data-cmd="c0 D">全部失能 D</button>
+          <button class="mini" data-cmd="c0 M0">缓动 M0</button>
+          <button class="mini" data-cmd="c0 M1">直驱 M1</button>
+          <button class="mini" data-cmd="c0 V2.5">V2.5</button>
+          <button class="mini" data-cmd="c0 V4">V4</button>
+          <button class="mini" data-cmd="c0 V8">V8</button>
+        </div>
+        <div class="row">
+          <span class="muted" style="align-self:center">相对移动（读当前角后 ±Δ）：</span>
+          <input class="num" id="relVal" value="0.5" />
+          <button class="mini" id="btnRelPlus">+Δ</button>
+          <button class="mini" id="btnRelMinus">−Δ</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>板级状态 <span class="muted" id="boardHint">—</span></h2>
+      <div class="body kv" id="boardState">
+        <b>SYSCLK</b><span id="vClock">—</span>
+        <b>CAN PSR</b><span id="vPsr">—</span>
+        <b>CAN ECR</b><span id="vEcr">—</span>
+        <b>UART1 drop</b><span id="vDrop">—</span>
+        <b>IMU 地址</b><span id="vImu">—</span>
+        <b>USB/ESP 命令</b><span id="vCmds">—</span>
+      </div>
+      <div class="body" style="padding-top:0">
+        <div class="kv">
+          <b>加速度</b><span class="big" id="vAcc">—</span>
+          <b>角速度</b><span class="big" id="vGyro">—</span>
+          <b>温度</b><span id="vTemp">—</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>驱动板</h2>
+      <div class="body nodecards">
+        <div class="node" id="node1"><h3>1 号 <span><span class="badge off" data-role="fault">—</span> <span class="badge off" data-role="en">—</span></span></h3>
+          <div class="val" data-role="angle">角度 —</div>
+          <div class="val" data-role="target">目标 —</div>
+          <div class="val" data-role="err">误差 —</div>
+          <div class="val" data-role="vlim">上限 —</div>
+          <div class="val" data-role="pk">电流 —</div>
+        </div>
+        <div class="node" id="node2"><h3>2 号 <span><span class="badge off" data-role="fault">—</span> <span class="badge off" data-role="en">—</span></span></h3>
+          <div class="val" data-role="angle">角度 —</div>
+          <div class="val" data-role="target">目标 —</div>
+          <div class="val" data-role="err">误差 —</div>
+          <div class="val" data-role="vlim">上限 —</div>
+          <div class="val" data-role="pk">电流 —</div>
+        </div>
+        <div class="node" id="node3"><h3>3 号 <span><span class="badge off" data-role="fault">—</span> <span class="badge off" data-role="en">—</span></span></h3>
+          <div class="val" data-role="angle">角度 —</div>
+          <div class="val" data-role="target">目标 —</div>
+          <div class="val" data-role="err">误差 —</div>
+          <div class="val" data-role="vlim">上限 —</div>
+          <div class="val" data-role="pk">电流 —</div>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const term = $("term");
+
+let port = null, reader = null, writer = null, connected = false;
+let lineBuf = "";                 // 未完成的行
+const pendingEcho = [];           // 本机发出去、等待被回显抹掉的行
+let currentQueryNode = null;      // 最近一次 c<N> 查询的节点
+let lastStatusNode = null;        // 上一条 EN= 行所属节点
+let history = [], histPos = 0;
+let autoPollTimer = null;
+const decoder = new TextDecoder();
+const encoder = new TextEncoder();
+const logLines = [];
+
+/* ---------------- 终端输出 ---------------- */
+function log(text, cls) {
+  const div = document.createElement("div");
+  if (cls) div.className = cls;
+  div.textContent = text;
+  term.appendChild(div);
+  logLines.push((cls === "tx" ? ">> " : cls === "rx" ? "<< " : "   ") + text);
+  if (logLines.length > 4000) logLines.shift();
+  while (term.childElementCount > 800) term.removeChild(term.firstChild);
+  if ($("autoScroll").checked) term.scrollTop = term.scrollHeight;
+}
+
+function setConn(on) {
+  connected = on;
+  $("dot").classList.toggle("on", on);
+  $("btnConnect").disabled = on;
+  $("btnDisconnect").disabled = !on;
+  $("input").disabled = !on;
+  $("btnSend").disabled = !on;
+  $("portInfo").textContent = on
+    ? "已连接 " + (port && port.getInfo ? describePort() : "")
+    : "未连接";
+}
+
+function describePort() {
+  const info = port.getInfo ? port.getInfo() : {};
+  const vid = info.usbVendorId != null ? info.usbVendorId.toString(16).padStart(4, "0") : "????";
+  const pid = info.usbProductId != null ? info.usbProductId.toString(16).padStart(4, "0") : "????";
+  return "VID " + vid + " PID " + pid;
+}
+
+/* ---------------- 连接 / 读取 ---------------- */
+async function connect() {
+  if (!("serial" in navigator)) {
+    log("此浏览器不支持 Web Serial，请使用 Chrome / Edge 89+。", "err");
+    return;
+  }
+  try {
+    port = await navigator.serial.requestPort();
+    const baud = parseInt($("baud").value, 10) || 115200;
+    await port.open({ baudRate: baud });
+    writer = port.writable.getWriter();
+    setConn(true);
+    log("已连接，波特率 " + baud, "ok");
+    readLoop();
+    setTimeout(() => send("b"), 350);
+  } catch (e) {
+    log("连接失败：" + (e && e.message ? e.message : e), "err");
+  }
+}
+
+async function readLoop() {
+  while (connected && port && port.readable) {
+    reader = port.readable.getReader();
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value && value.length) feed(decoder.decode(value, { stream: true }));
+      }
+    } catch (e) {
+      if (connected) log("读取中断：" + (e && e.message ? e.message : e), "err");
+    } finally {
+      try { reader.releaseLock(); } catch (_) { }
+      reader = null;
+    }
+  }
+}
+
+async function disconnect() {
+  setConn(false);
+  if (autoPollTimer) { clearInterval(autoPollTimer); autoPollTimer = null; }
+  try { if (reader) await reader.cancel(); } catch (_) { }
+  try { if (writer) { writer.releaseLock(); writer = null; } } catch (_) { }
+  try { if (port) await port.close(); } catch (_) { }
+  port = null;
+  log("已断开", "info");
+}
+
+/* ---------------- 发送 ---------------- */
+async function send(text) {
+  if (!connected || !writer) { log("未连接，无法发送", "warn"); return false; }
+  const cmd = String(text).replace(/[\r\n]+$/, "");
+  if (!cmd) return false;
+  try {
+    pendingEcho.push(cmd);
+    if (pendingEcho.length > 16) pendingEcho.shift();
+    await writer.write(encoder.encode(cmd + "\r"));
+    log("» " + cmd, "tx");
+    if (cmd[0] === "c" && cmd.length > 2 && /[0-9]/.test(cmd[1])) {
+      currentQueryNode = parseInt(cmd[1], 10);
+    }
+    return true;
+  } catch (e) {
+    log("发送失败：" + (e && e.message ? e.message : e), "err");
+    return false;
+  }
+}
+
+/* ---------------- 收字节 -> 行 ---------------- */
+function feed(text) {
+  // 去掉 ANSI 转义（本固件不发，但保底）
+  text = text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+  // 处理退格显示序列 "\b \b"
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "\n") {
+      handleLine(lineBuf);
+      lineBuf = "";
+    } else if (ch === "\r") {
+      // CR：如果后面紧跟 LF，交给 LF 处理
+      if (text[i + 1] !== "\n") { handleLine(lineBuf); lineBuf = ""; }
+    } else if (ch === "\b") {
+      lineBuf = lineBuf.slice(0, -1);
+    } else if (ch === "\u0000") {
+      /* ignore */
+    } else {
+      lineBuf += ch;
+    }
+  }
+  if (lineBuf === "> ") lineBuf = "";     // 提示符不进入行缓冲
+}
+
+function stripPrompt(line) {
+  let s = line;
+  while (s.startsWith("> ")) s = s.slice(2);
+  if (s === ">") s = "";
+  return s;
+}
+
+function handleLine(raw) {
+  let line = stripPrompt(raw).replace(/\s+$/, "");
+  if (!line) return;
+
+  // 回显：本机刚发出去的那一行，丢掉不显示
+  if (pendingEcho.length && line === pendingEcho[0]) {
+    pendingEcho.shift();
+    return;
+  }
+
+  let cls = "rx";
+  if (/^unknown command/.test(line) || /FAIL|FAILED|failed/.test(line)) cls = "err";
+  else if (/^\[CAN\]/.test(line) || /^\[I2C\]/.test(line) || /^\[IMU\]/.test(line) ||
+           /^\[ESP/.test(line) || /^\[UART/.test(line)) cls = "info";
+  else if (/^TX node/.test(line)) cls = "ok";
+  log(line, cls);
+  parse(line);
+}
+
+/* ---------------- 解析 ---------------- */
+const NUM = "(-?\\d+(?:\\.\\d+)?)";
+
+function parse(line) {
+  let m;
+
+  // 板级：SYSCLK=170000000  CAN PSR=0x0000076A ECR=0x0010F900 rx=0 busoff=0 txdrop=0
+  if (/SYSCLK=/.test(line)) {
+    if ((m = line.match(/SYSCLK=(\d+)/))) $("vClock").textContent = m[1];
+    if ((m = line.match(/CAN PSR=0x([0-9A-Fa-f]+)/))) $("vPsr").textContent = "0x" + m[1];
+    if ((m = line.match(/ECR=0x([0-9A-Fa-f]+)/))) $("vEcr").textContent = "0x" + m[1];
+    $("boardHint").textContent = new Date().toLocaleTimeString();
+    return;
+  }
+  if ((m = line.match(/UART1 dropped=(\d+)/))) {
+    $("vDrop").textContent = m[1];
+    let im = line.match(/IMU addr=0x([0-9A-Fa-f]+)/i);
+    if (im) $("vImu").textContent = "0x" + im[1];
+    return;
+  }
+  if ((m = line.match(/IMU addr=0x([0-9A-Fa-f]+)/i))) {
+    $("vImu").textContent = "0x" + m[1];
+    return;
+  }
+  if ((m = line.match(/commands: USB=(\d+)\s+ESP=(\d+)/))) {
+    $("vCmds").textContent = m[1] + " / " + m[2];
+    return;
+  }
+
+  // IMU：IMU acc[g] -0.006 0.052 1.021   gyro[dps] 1.2 0.4 2.4   temp 29.1 C
+  if (/IMU acc/.test(line)) {
+    m = line.match(new RegExp("acc\\[g\\]\\s+" + NUM + "\\s+" + NUM + "\\s+" + NUM));
+    if (m) $("vAcc").textContent = m[1] + " " + m[2] + " " + m[3];
+    m = line.match(new RegExp("gyro\\[dps\\]\\s+" + NUM + "\\s+" + NUM + "\\s+" + NUM));
+    if (m) $("vGyro").textContent = m[1] + " " + m[2] + " " + m[3];
+    m = line.match(new RegExp("temp\\s+" + NUM));
+    if (m) $("vTemp").textContent = m[1] + " °C";
+    return;
+  }
+
+  // 巡检带前缀：  [0x281] EN=OFF angle=... 
+  let prefixNode = null;
+  m = line.match(/^\s*\[0x28([1-7])\]\s*(.*)$/);
+  if (m) {
+    prefixNode = parseInt(m[1], 10);
+    line = m[2];
+  }
+
+  // 驱动板状态行
+  if (/EN=(ON|OFF)/.test(line)) {
+    const node = prefixNode || currentQueryNode || lastStatusNode || 1;
+    lastStatusNode = node;
+    updateNodeFromStatus(node, line);
+    return;
+  }
+  // CAN txdrop=0 nFAULT=1
+  if ((m = line.match(/CAN txdrop=(\d+)\s+nFAULT=(\d)/))) {
+    const node = prefixNode || lastStatusNode;
+    if (node) setFaultBadge(node, m[2] === "1");
+    return;
+  }
+  // I pk=0.14A allowed=8.00V req=4.00V th=0.00 smp=... trips=0 ok=1
+  if ((m = line.match(new RegExp("I pk=" + NUM + "A\\s+allowed=" + NUM + "V")))) {
+    if (lastStatusNode) setNodeText(lastStatusNode, "pk", "电流 " + m[1] + " A");
+    return;
+  }
+}
+
+const nodeData = { 1: {}, 2: {}, 3: {} };
+
+function setNodeText(node, role, text) {
+  const card = $("node" + node);
+  if (!card) return;
+  const el = card.querySelector('[data-role="' + role + '"]');
+  if (el) el.textContent = text;
+}
+
+function setBadge(node, kind, text) {
+  const card = $("node" + node);
+  if (!card) return;
+  const el = card.querySelector('[data-role="en"]');
+  if (!el) return;
+  el.textContent = text;
+  el.className = "badge " + (kind === "ok" ? "on" : kind === "fault" ? "fault" : "off");
+}
+
+function setFaultBadge(node, healthy) {
+  const card = $("node" + node);
+  if (!card) return;
+  const el = card.querySelector('[data-role="fault"]');
+  if (!el) return;
+  el.textContent = healthy ? "nFAULT ✓" : "nFAULT ✗";
+  el.className = "badge " + (healthy ? "off" : "fault");
+}
+
+function updateNodeFromStatus(node, line) {
+  const g = (re) => { const mm = line.match(re); return mm ? parseFloat(mm[1]) : null; };
+  const en = /EN=ON/.test(line);
+  setBadge(node, en ? "ok" : "off", en ? "使能" : "失能");
+
+  const angle = g(new RegExp("angle=" + NUM));
+  const tgt = g(new RegExp("tgt=" + NUM));
+  const vlim = g(new RegExp("Vlim=" + NUM));
+  if (angle != null) setNodeText(node, "angle", "角度 " + angle.toFixed(4));
+  if (tgt != null) setNodeText(node, "target", "目标 " + tgt.toFixed(4));
+  if (angle != null && tgt != null) {
+    const err = tgt - angle;
+    setNodeText(node, "err", "误差 " + (err * 180 / Math.PI).toFixed(3) + "°");
+  }
+  if (vlim != null) setNodeText(node, "vlim", "上限 " + vlim.toFixed(2) + " V");
+}
+
+/* ---------------- UI 事件 ---------------- */
+$("btnConnect").onclick = connect;
+$("btnDisconnect").onclick = disconnect;
+$("btnClear").onclick = () => { term.innerHTML = ""; logLines.length = 0; };
+$("btnSave").onclick = () => {
+  const blob = new Blob([logLines.join("\n")], { type: "text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "host-console-" + new Date().toISOString().replace(/[:.]/g, "-") + ".log";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+$("btnSend").onclick = () => { send($("input").value); $("input").value = ""; };
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    const v = $("input").value;
+    if (v.trim()) { history.push(v); histPos = history.length; }
+    send(v);
+    $("input").value = "";
+  } else if (e.key === "ArrowUp") {
+    if (histPos > 0) { histPos--; $("input").value = history[histPos] || ""; }
+    e.preventDefault();
+  } else if (e.key === "ArrowDown") {
+    if (histPos < history.length - 1) { histPos++; $("input").value = history[histPos] || ""; }
+    else { histPos = history.length; $("input").value = ""; }
+    e.preventDefault();
+  }
+});
+
+document.querySelectorAll("[data-cmd]").forEach((btn) => {
+  btn.onclick = () => send(btn.getAttribute("data-cmd"));
+});
+
+$("btnOpSend").onclick = () => {
+  const node = $("nodeSel").value;
+  const op = $("opSel").value;
+  const val = $("opVal").value.trim();
+  if (op === "T" || op === "V" || op === "L" || op === "M") {
+    send("c" + node + " " + op + val);
+  }
+};
+
+$("btnRelPlus").onclick = () => relativeMove(+1);
+$("btnRelMinus").onclick = () => relativeMove(-1);
+
+async function relativeMove(sign) {
+  const node = $("nodeSel").value;
+  const delta = parseFloat($("relVal").value);
+  if (!isFinite(delta)) { log("Δ 不是数字", "err"); return; }
+  if (node === "0") { log("相对移动需要选具体节点（不能广播）", "warn"); return; }
+  // 先问一次当前角，再发目标
+  await send("c" + node + " R");
+  const cur = await waitForAngle(600);
+  if (cur == null) { log("没读到当前角度，先确认该板在线", "err"); return; }
+  const target = cur + sign * delta;
+  await send("c" + node + " T" + target.toFixed(4));
+  log("→ node" + node + " 目标 " + target.toFixed(4) + " rad（当前 " + cur.toFixed(4) + "）", "ok");
+}
+
+let angleWaiters = [];
+function waitForAngle(timeoutMs) {
+  return new Promise((resolve) => {
+    const w = { resolve, done: false };
+    angleWaiters.push(w);
+    setTimeout(() => { if (!w.done) { w.done = true; resolve(null); } }, timeoutMs);
+  });
+}
+
+// 抓 R 回复里的角度：sensor angle=... mech=...
+const _handleLine = handleLine;
+handleLine = function (raw) {
+  let line = stripPrompt(raw).replace(/\s+$/, "");
+  if (angleWaiters.length) {
+    const m = line.match(/sensor angle=(-?\d+(?:\.\d+)?)/) || line.match(/angle=(-?\d+(?:\.\d+)?)/);
+    if (m) {
+      const w = angleWaiters.shift();
+      if (!w.done) { w.done = true; w.resolve(parseFloat(m[1])); return; }
+    }
+  }
+  _handleLine(raw);
+};
+
+$("autoPoll").onchange = async () => {
+  if (autoPollTimer) { clearInterval(autoPollTimer); autoPollTimer = null; }
+  if (!$("autoPoll").checked || !connected) return;
+  const tick = async () => {
+    if (!connected) return;
+    for (const n of [1, 2, 3]) {
+      await send("c" + n + " ?");
+      await new Promise((r) => setTimeout(r, 140));
+    }
+  };
+  tick();
+  autoPollTimer = setInterval(tick, 2000);
+};
+
+window.addEventListener("beforeunload", () => { try { disconnect(); } catch (_) { } });
+
+log("上位机板控制台就绪：点「连接串口」，选择 CH343P（COMx，115200）。", "info");
+log("固件支持：h 帮助 / b 板级状态 / m IMU / n 巡检 / c<N> <cmd> 转发驱动板命令。", "info");
+</script>
+</body>
+</html>
