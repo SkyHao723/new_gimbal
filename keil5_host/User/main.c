@@ -202,6 +202,7 @@ static void esp_link_selftest(void)
            (unsigned long)esp_link_bad_lines(), (unsigned long)esp_link_bad_bytes(),
            (unsigned long)esp_link_ignored_lines(), (unsigned long)esp_link_dropped_bytes());
 
+    { char smp[96]; esp_link_sample(smp, sizeof(smp)); printf("[ESP-SAMPLE] framing_err=%lu ""%s""\r\n", (unsigned long)esp_link_rx_errors(), smp); }
     esp_link_pin_test(pins);
     printf("[ESP-PINS] idle PA2=%lu PA3=%lu | PA2 low -> PA3=%lu | PA2 high -> PA3=%lu\r\n",
            (unsigned long)pins[0], (unsigned long)pins[1],

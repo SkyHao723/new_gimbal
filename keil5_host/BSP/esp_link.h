@@ -37,6 +37,9 @@ void esp_link_pin_test(uint32_t out[4]);
 int esp_link_guard(uint32_t now_ms);
 int esp_link_muted(void);
 uint32_t esp_link_muted_drops(void);
+/* Copies the last printable run seen on the ESP line (diagnostics). */
+void esp_link_sample(char *out, uint32_t size);
+uint32_t esp_link_rx_errors(void);
 
 /* 1 when the UART has been initialised (TX may be used). */
 int esp_link_ready(void);

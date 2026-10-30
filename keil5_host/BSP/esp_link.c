@@ -20,6 +20,10 @@ static uint32_t muted_until_ms;
 static uint32_t rate_ms;
 static uint32_t rate_bytes;
 static volatile uint32_t muted_drops;
+static volatile uint32_t rx_errors;
+/* Last run of printable bytes seen on the ESP line, for diagnostics. */
+static volatile char sample[97];
+static volatile uint32_t sample_len;
 static char line_buf[ESP_LINE_MAX];
 static uint32_t line_len;
 static uint8_t line_bad;
@@ -90,12 +94,17 @@ void esp_link_flush_input(void)
 void USART2_IRQHandler(void)
 {
     uint32_t isr = USART2->ISR;
+    if (isr & (USART_ISR_FE | USART_ISR_NE | USART_ISR_PE)) ++rx_errors;
     if (isr & USART_ISR_RXNE) {
         uint8_t ch = (uint8_t)USART2->RDR;
         uint16_t next = (uint16_t)((rx_head + 1u) % ESP_RX_RING);
         ++rx_bytes;
         if (next == rx_tail) ++rx_dropped;
         else { rx_ring[rx_head] = ch; rx_head = next; }
+        if (ch >= 0x20u && ch <= 0x7Eu) {
+            if (sample_len < (sizeof(sample) - 1u)) sample[sample_len++] = (char)ch;
+            else sample_len = 0u;
+        }
     }
     if (isr & (USART_ISR_ORE | USART_ISR_FE | USART_ISR_NE | USART_ISR_PE)) {
         USART2->ICR = USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF | USART_ICR_PECF;
@@ -190,6 +199,24 @@ uint32_t esp_link_ignored_lines(void)
 /* Noise guard: the ESP line is only trusted when it carries a plausible byte
    rate. A floating or looped line can dump >10 kB/s of text, which would burn
    the main loop and drown real input; mute it for a while instead. */
+uint32_t esp_link_rx_errors(void)
+{
+    return rx_errors;
+}
+
+void esp_link_sample(char *out, uint32_t size)
+{
+    uint32_t i, n = sample_len;
+
+    if (size == 0u) return;
+    if (n >= size) n = size - 1u;
+    for (i = 0; i < n; ++i) {
+        char ch = sample[i];
+        out[i] = (ch >= 0x20 && ch <= 0x7E) ? ch : '.';
+    }
+    out[n] = 0;
+}
+
 int esp_link_guard(uint32_t now_ms)
 {
     uint32_t delta;

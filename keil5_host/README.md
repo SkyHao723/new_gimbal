@@ -226,3 +226,36 @@ x growing ~15 kB/s, commands ESP=0
 * ESP input path: framing + routing + guards verified, but **cannot be
   verified end-to-end until the ESP32 firmware sends @-prefixed lines** and
   the continuous junk stream on PA3 is explained (see e output).
+
+### What the ESP line actually carries (2026-10-30)
+
+e also prints [ESP-SAMPLE], the last printable run seen on PA3. On the
+bench it reads:
+
+`
+[ESP-SAMPLE] framing_err=5 invalid header: 0xffffffffinvalid header: 0xffffffff...
+`
+
+That is the **ESP32 ROM bootloader complaining about an empty / invalid app
+image** - the ESP32-S3 on this board has no valid firmware yet, so it reboots
+in a loop and prints invalid header: 0xffffffff forever at 115200. Hence the
+~12 kB/s of ASCII on PA3 (
+x climbing, commands ESP=0 because nothing
+starts with @).
+
+So the ESP input cannot be validated end-to-end until the ESP32-S3 is flashed
+with a bridge firmware that (a) stays quiet, (b) reads commands from its USB
+CDC and writes @<cmd>\r\n to its UART TX at 115200, (c) optionally parses
+the replies for its own display/UI.
+
+Measured counters with the boot-looping ESP32 attached:
+
+| Field | Value |
+| --- | --- |
+| 
+x | climbing ≈ 12 kB/s (35430 -> 93049 in a few seconds) |
+| ad lines/bytes | tiny (stream is valid 115200 ASCII) |
+| raming_err | 1-5 (occasional glitch only) |
+| ignored | climbing (no line starts with @) |
+| commands ESP= | 0 - the gate prevents junk from running |
+| muted | 1 (rate guard engaged) |
