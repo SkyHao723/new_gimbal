@@ -52,6 +52,6 @@
  *     万用表直接量 IMU 的 SDA/SCL 引脚，判断"MCU 到芯片这段线到底通不通"。
  *     测出来如果 IMU 侧电压跟着翻，线就是通的；不跟就是断线/虚焊/走线错。
  * 0 = 正常固件（自检后进入 I2C 模式）。默认 0，排查时临时改 1。 */
-#define HOST_I2C_PIN_DRIVE_TEST     1
+#define HOST_I2C_PIN_DRIVE_TEST     0
 
 #endif
