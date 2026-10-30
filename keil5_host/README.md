@@ -259,3 +259,19 @@ x | climbing ≈ 12 kB/s (35430 -> 93049 in a few seconds) |
 | ignored | climbing (no line starts with @) |
 | commands ESP= | 0 - the gate prevents junk from running |
 | muted | 1 (rate guard engaged) |
+
+
+### ESP32-S3 side firmware
+
+The ESP32-S3 bridge that feeds this input lives in `../esp32_bridge/`:
+
+* `esp32_bridge.ino` - Arduino sketch: USB CDC (PC) <-> UART (G431, 115200),
+  adds the `@` prefix, provides `!help/!stat/!ping/!probe/!raw/!reboot` and
+  auto-detects which UART actually reaches this board.
+* `esp32_bridge/README.md` - wiring, Arduino IDE settings, troubleshooting.
+
+Expected exchange once it is flashed:
+
+```
+[esp32] G431 is alive: "EN=OFF angle=... dir=-1 zero=1.2270 Vbus=24.0 nFAULT=1"
+```
