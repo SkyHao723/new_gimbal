@@ -28,4 +28,23 @@ int imu_read_raw(const ImuInfo *imu, int16_t accel[3], int16_t gyro[3], int16_t 
 
 const char *imu_last_error(void);
 
+/* Bring-up bus diagnostics. Results stay in RAM so they can be read over SWD
+ * even when the USB serial port is unavailable.
+ *   bus_diag[0] : IDR snapshot, internal PULL-UP   (bit6=SCL, bit7=SDA, 1=high)
+ *   bus_diag[1] : IDR snapshot, internal PULL-DOWN (1 => external pull-up fitted)
+ *   bus_diag[2] : number of SCL clocks issued by the bus-clear routine (9)
+ *   bus_diag[3] : IDR snapshot after bus-clear (pull-up again)
+ *   bus_diag[4] : address scan hit count
+ *   bus_diag[5] : first hit address | (second hit << 8)
+ *   bus_diag[6] : I2C1->ISR after init/scan
+ *   bus_diag[7] : I2C1->TIMINGR after init/scan
+ */
+extern volatile uint32_t bus_diag[8];
+/* Software-I2C scan (bypasses the peripheral, tests wiring/address/power):
+ *   sw_scan[0] hits with SCL=PB6/SDA=PB7, sw_scan[1] first address found
+ *   sw_scan[2] hits with SCL=PB7/SDA=PB6, sw_scan[3] first address found      */
+extern volatile uint32_t sw_scan[4];
+void imu_bus_diag(void);
+void imu_bus_diag_scan_result(int found_count, const uint8_t *found);
+
 #endif

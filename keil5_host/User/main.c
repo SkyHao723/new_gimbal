@@ -61,8 +61,15 @@ static void imu_bringup(void)
     /* 先初始化 I2C1（PB6/PB7 引脚 + 外设 + 100k 时序），否则后面的扫描/读寄存器全是空转 */
     imu_i2c_init();
 
+    /* 先做引脚级总线自检（结果存 RAM，串口打不开也能用 SWD 读 bus_diag[8]），
+       内部会顺带做 9 个时钟的总线解锁并初始化 I2C1 */
+    imu_bus_diag();
+
     printf("\r\n[I2C] scanning 0x08..0x77 ...\r\n");
+    printf("[I2C] bus levels  pu=%02lX pd=%02lX clear=%02lX\r\n",
+           (unsigned long)bus_diag[0], (unsigned long)bus_diag[1], (unsigned long)bus_diag[3]);
     n = imu_scan(found, 16);
+    imu_bus_diag_scan_result(n, found);
     if (n <= 0) {
         printf("[I2C] no device found - check IMU soldering, PB6/PB7 pull-ups, 3V3\r\n");
         return;
