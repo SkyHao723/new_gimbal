@@ -1,9 +1,0 @@
-{
-  "additionalFiles": "..\\..",
-  "compiler.optimization_flags": "-Os",
-  "customBuildProperties": "",
-  "fqbn": "esp32:esp32:esp32s3:CDCOnBoot=cdc,USBMode=hwcdc",
-  "hardwareFolders": "C:\\Users\\SkyHao\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\3.3.10,C:\\Users\\SkyHao\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\3.3.10",
-  "otherLibrariesFolders": "C:\\Users\\SkyHao\\Documents\\Arduino\\libraries",
-  "sketchLocation": "D:\\dsh_build\\ng\\esp32_bridge"
-}
