@@ -32,3 +32,6 @@ desktop.ini
 # Python diagnostic tools
 __pycache__/
 *.py[cod]
+
+# Arduino IDE build artifacts
+esp32_bridge/build/
