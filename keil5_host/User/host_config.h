@@ -6,7 +6,7 @@
 
    PA9  / PA10 : USART1  <-> CH343P <-> USB（和电脑通信，115200 8N1）
    PB8  / PB9  : FDCAN1  <-> TJA1042（CAN 主机，500 kbit/s，与驱动板同一套参数）
-   PB6  / PB7  : I2C1    <-> ICM-42670-P（六轴 IMU，地址 0x68 或 0x69）
+   PB6  / PB7  : GPIO I2C <-> ICM-42670-P（六轴 IMU，地址 0x68 或 0x69）
    PA5         : 工作指示灯
    PA2  / PA3  : USART2  <-> ESP32-S3（功能暂缓，只初始化不通信）
 */
@@ -22,10 +22,6 @@
 #define HOST_CONSOLE_BAUD        115200u
 
 /* ---- IMU（ICM-42670-P） ---------------------------------------------- */
-#define HOST_I2C_INSTANCE        I2C1
-#define HOST_I2C_TIMING_100K     0xF0413335u  /* 170 MHz PCLK1 -> 100 kHz */
-#define HOST_I2C_TIMING_50K      0xF0813335u
-#define HOST_I2C_TIMING_10K      0xF0429A9Au
 #define HOST_IMU_ADDR_PRIMARY    0x68u
 #define HOST_IMU_ADDR_SECONDARY  0x69u
 #define HOST_IMU_WHO_AM_I_REG    0x75u

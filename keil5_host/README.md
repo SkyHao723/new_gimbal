@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | PA9 / PA10 | USART1 TX / RX | 接 CH343P → USB 连电脑，**115200 8N1**，AF7 |
 | PB8 / PB9 | FDCAN1 RX / TX | 接 TJA1042（CAN 主机），**500 kbit/s**，AF9 |
-| PB6 / PB7 | I2C1 SCL / SDA | 接 ICM-42670-P，硬件 I2C，地址 0x68（或 0x69），AF4 |
+| PB6 / PB7 | GPIO I2C SCL / SDA | 接 ICM-42670-P，开漏软件 I2C，地址 0x68（或 0x69） |
 | PA5 | 工作指示灯 | 代码默认**低电平点亮**（见 `HOST_LED_ACTIVE_LOW`，焊好实测后按需改） |
 | PA2 / PA3 | USART2 TX / RX | 与 ESP32-S3 通讯，**暂缓**，只做了初始化（115200） |
 
@@ -47,11 +47,13 @@ $cli='D:\program\STM32CubeCLT_1.21.0\STM32CubeProgrammer\bin\STM32_Programmer_CL
 ===== G431 host board bring-up =====
 SYSCLK=170000000 Hz  HCLK=170000000  PCLK1=170000000  PCLK2=170000000   <- 时钟 170 MHz
 UART1 PA9/PA10 <-> CH343P @ 115200 8N1                                 <- 这行能出来就说明串口通了
-I2C1 PB6/PB7 -> ICM-42670-P   FDCAN1 PB8/PB9 @ 500k   LED PA5
+GPIO-I2C PB6/PB7 -> ICM-42670-P   FDCAN1 PB8/PB9 @ 500k   LED PA5
 [UART2] PA2/PA3 initialised @ 115200 (ESP32 protocol deferred)
 [I2C] scanning 0x08..0x77 ...
+[I2C] bus levels  pu=C0 pd=C0 clear=C0                                 <- PB6/PB7 空闲为高
+[I2C] GPIO scan PB6=SCL PB7=SDA: 1 device(s), first 0x68; swapped: 0, first 0x00
 [I2C] 1 address(es): 0x68                                             <- 找到 IMU
-[IMU] OK  addr=0x68  WHO_AM_I=0x67  I2C clock=100k                    <- WHO_AM_I 必须是 0x67
+[IMU] OK  addr=0x68  WHO_AM_I=0x67  I2C clock=10k GPIO                 <- WHO_AM_I 必须是 0x67
 IMU acc[g] 0.00 0.00 1.00   gyro[dps] 0.0 0.0 0.0   temp 25.0 C        <- 平放时某一轴约 ±1 g
 [CAN] init FDCAN1 500k ... OK  PSR=0x...                              <- CAN 初始化成功
 [CAN] broadcast '?', collecting replies for 2 s (PSR=... ECR=0)
@@ -83,8 +85,8 @@ IMU acc[g] 0.00 0.00 1.00   gyro[dps] 0.0 0.0 0.0   temp 25.0 C        <- 平放
 | 串口完全没输出 | CH343P 的 3V3/GND、PA9/PA10 是否接反、USB 线是否只充电、波特率是否 115200 |
 | 输出乱码 | 波特率不匹配（`HOST_CONSOLE_BAUD`）、PCLK2 不是 170 MHz |
 | `SYSCLK` 不是 170000000 | HSE 8 MHz 晶振没起振（`clock_init()` 会退回 HSI，打印值会变） |
-| `[I2C] no device found` | **本板是项目里第一次用硬件 I2C**（驱动板一直用软件 I2C 顶着）：先查 PB6/PB7 上拉（4.7 k 到 3V3）、IMU 供电、地址 0x68/0x69；代码已内置 100k→50k→10k 自动降速，能区分"速度问题"和"接线问题" |
-| `[IMU] init failed: who_am_i` | 读到器件但不是 0x67：型号不是 ICM-42670-P，或电源/SPI 模式选择脚不对 |
+| `[I2C] no device found` | 先看 `GPIO scan` 与 `bus levels`：确认 PB6/PB7 开漏、外部上拉（约 4.7–10 kΩ 到 3V3）、IMU 的 VDD/VDDIO 与 GND、AP_CS 拉高进入 I2C 模式、AP_AD0 选择 0x68/0x69。PB6 不支持本芯片的 I2C1_SCL 复用，所以固件使用 10 kHz GPIO 模拟 I2C |
+| `[IMU] init failed` | 地址应答后 WHO_AM_I 应为 0x67；检查是否为 ICM-42670-P、AP_CS 是否拉高选择 I2C，以及 VDD/VDDIO |
 | IMU 读到 0 / 全 0 | 初始化寄存器没写进去；用 `i` 重扫确认地址，再看 `imu_last_error()` 文本 |
 | CAN `init FAILED` | PB8/PB9 与 TJA1042 的 RXD/TXD 是否交叉、TJA1042 的 5V 是否供电（驱动板 v1.1 经验：**收发器没 5V 时 CAN 一帧都发不出去**） |
 | CAN 初始化 OK 但 `no reply` | CANH/CANL 是否反、两端 120 Ω 终端（量 CANH–CANL 约 60 Ω）、三块驱动板是否上电、ID 是否对（0x201..0x203） |
@@ -92,12 +94,21 @@ IMU acc[g] 0.00 0.00 1.00   gyro[dps] 0.0 0.0 0.0   temp 25.0 C        <- 平放
 
 ## 6. 已知风险 / 待验证
 
-1. **硬件 I2C 是第一次上板**：驱动板那边硬件 I2C 从未跑通（一直靠软件 I2C），所以 IMU 扫不到时要优先怀疑 I2C 配置与时序，而不是 IMU 本身。
+1. STM32G431 的 PB6 没有 I2C1_SCL 复用功能，因此 PB6/PB7 必须使用开漏 GPIO 模拟 I2C；PB6 同时是 UCPD1_CC1，不用 USB-C/UCPD 时要关闭 dead-battery 下拉。
 2. **PA5 灯极性**先按"低电平点亮"写（沿用驱动板），实测若相反只改 `host_config.h` 里的 `HOST_LED_ACTIVE_LOW`。
 3. **TJA1042 的 STB 脚**：这块板的引脚清单没提，代码默认 `HOST_CAN_DRIVE_STB_ON_PB5 = 0`（假设 STB 直接接地/下拉）。若 CAN 无输出且确认收发器有电，把该宏改 1 并确认 STB 实际接的是 PB5。
 4. ESP32-S3 只做了 UART2 初始化，协议留空。
 
-## 7. 第一次上板踩到的两个坑（2026-10-29，已修）
+## 7. 已排除的上板问题
+
+### ICM-42670-P I2C 无应答（2026-10-30，已在板验证）
+
+- G431CBTx 的 PB6 复用表没有 `I2C1_SCL`，因此原硬件 I2C 配置不会在 PB6 输出时钟。已改为 PB6/PB7 开漏 GPIO、10 kHz 软件 I2C。
+- PB6 同时是 `UCPD1_CC1`。实测原固件的 `PWR->CR3=0x8000`，`UCPD_DBDIS`（bit 14）未置位；UCPD dead-battery 下拉把 PB6 拉低。新固件初始化时调用 `HAL_PWREx_DisableUCPDDeadBattery()`；SWD 回读 `PWR->CR3=0xC000`。
+- 修正传感器数据寄存器地址：温度 `0x09`、加速度 X `0x0B`、陀螺 X `0x11`。规格书页 52–54；原文件中的 `0x1D/0x2F/0x25` 会读错数据。
+- 新固件在实机扫描到地址 `0x68`，`WHO_AM_I=0x67`；静止读数约 `0.001, -0.056, 1.017 g`、`-0.5, 0.0, 0.7 dps`、`25.8 °C`。外部上拉已由总线高电平读数确认。
+
+### 首次上板的其他两个问题（2026-10-29，已修）
 
 1. **上电进了系统 bootloader**：这块板的 `PB8` 既是 `FDCAN1_RX`，又和 `BOOT0` 引脚复用/受其影响，
    上电瞬间收发器把 PB8 拉高 → 芯片进 STM32 系统 bootloader，表现为"固件烧写成功但程序完全不跑"
@@ -113,3 +124,32 @@ IMU acc[g] 0.00 0.00 1.00   gyro[dps] 0.0 0.0 0.0   temp 25.0 C        <- 平放
 
 自检办法（不依赖串口，用 SWD）：`ICSR(0xE000ED04)` 的 VECTACTIVE 应为 0；
 `GPIOA->ODR(0x48000014)` 的 bit5 每 0.5 s 翻转一次；`USART1->BRR(0x4001380C) = 0x5C4`。
+
+## 2026-10-30：IMU 一直读不到的真正原因（已修复）
+
+三块驱动板一直"硬件 I2C 不通"、上位机板的 ICM-42670-P 也一个地址都不应答 —— 这次查清了，是**引脚复用**问题，不是焊接也不是芯片坏：
+
+1. **PB6 在 STM32G431 上根本没有 I2C1 的复用功能**。G431 的 I2C1_SCL 只在 PA13 / PA15 / PB8，I2C1_SDA 只在 PA14 / PB7 / PB9；PB6 的 AF 是 TIM16_CH1N / TIM4_CH1 / TIM8_CH1 / USART1_TX，另有 **UCPD1_CC1** 功能。所以之前所有"把 PB6/PB7 配成 AF4 + 硬件 I2C1"的做法**注定失败**（外设收不到时钟，也驱动不了 SCL）。
+2. PB6/PB7 作为 UCPD 引脚上电后带有**死电池下拉**（dead-battery pull-down，`PWR_CR3.UCPD1_DBDIS`），不清掉会把两根线往地拉。修复第一行就是 `HAL_PWREx_DisableUCPDDeadBattery()`。
+3. 因此 IMU 改成 **GPIO 开漏 bit-bang I2C**（`BSP/icm42670.c`）：含 SCL 释放等待（防时钟拉伸）、超时、9 时钟总线解锁、START/STOP 完整时序。
+4. 顺带修掉一个真 bug：**ICM-42670-P 的 bank0 寄存器地址用错了**（原来抄的是 ICM-42688 的 map）：
+   - `TEMP_DATA1 = 0x09`（曾误写 0x1D）
+   - `ACCEL_DATA_X1 = 0x0B`（曾误写 0x2F）
+   - `GYRO_DATA_X1 = 0x11`（曾误写 0x25）
+   `WHO_AM_I(0x75)=0x67`、`PWR_MGMT0(0x1F)`、`GYRO_CONFIG0(0x20)`、`ACCEL_CONFIG0(0x21)` 不变。
+
+修复后实测（COM15，115200）：
+
+```
+[I2C] GPIO scan PB6=SCL PB7=SDA: 1 device(s), first 0x68; swapped: 0, first 0x00
+[IMU] OK  addr=0x68  WHO_AM_I=0x67  I2C = GPIO bit-bang 250 kHz
+IMU acc[g] 0.000 -0.056 1.022   gyro[dps] -0.5 -0.1 0.7   temp 25.7 C
+[STRESS] 200/200 OK, total 211668 us, 1058 us/read, 944.9 Hz max
+```
+
+- 静态放置时 Z 轴 ≈ 1.02 g、X/Y ≈ 0、陀螺 ≈ 0，读数正确
+- 一次完整读取（加速度 6B + 陀螺 6B + 温度 2B）≈ **1.06 ms**，理论上限 ~945 Hz，够做姿态解算
+- 速度由 `BSP/icm42670.h` 的 `IMU_I2C_HALF_PERIOD_US` 控制：2 µs = 250 kHz；拉到不稳就加大（5 µs = 100 kHz，实测同样 200/200 通过）
+- 新增 `t` 命令做压力测试（200 次读，报成功率/单次耗时/上限频率）
+
+**对三块驱动板的启示**：它们的 AS5600 也接在 PB6/PB7 上，之前"硬件 I2C 不通、改用软件 I2C"其实是**唯一正确解**，不是将就。以后新板若想用硬件 I2C，请把 SCL/SDA 放到 **PB8/PB9**（或 PA13/PA15 + PA14）。

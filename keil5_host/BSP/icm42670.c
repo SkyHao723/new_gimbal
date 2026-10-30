@@ -1,97 +1,192 @@
 #include "stm32g4xx_hal.h"
+#include "stm32g4xx_hal_pwr_ex.h"
 #include "icm42670.h"
 #include "host_config.h"
 #include <string.h>
 
-static I2C_HandleTypeDef i2c;
 static const char *last_error = "";
+static uint32_t i2c_core_clock_hz;
 
 /* ICM-42670-P bank0 寄存器 */
-#define REG_TEMP_DATA1   0x1Du
+#define REG_TEMP_DATA1   0x09u
 #define REG_PWR_MGMT0    0x1Fu
 #define REG_GYRO_CONFIG0 0x20u
 #define REG_ACCEL_CONFIG0 0x21u
-#define REG_GYRO_DATA_X1 0x25u
-#define REG_ACCEL_DATA_X1 0x2Fu
+#define REG_GYRO_DATA_X1 0x11u
+#define REG_ACCEL_DATA_X1 0x0Bu
+
+#define I2C_SCL_PIN GPIO_PIN_6
+#define I2C_SDA_PIN GPIO_PIN_7
+#define I2C_HALF_PERIOD_US IMU_I2C_HALF_PERIOD_US
+#define I2C_STRETCH_TIMEOUT_US 250u
 
 const char *imu_last_error(void) { return last_error; }
 
-static void i2c_gpio_init(void)
+static void i2c_delay_us(uint32_t us)
 {
-    RCC->AHB2ENR |= RCC_AHB2ENR_GPIOBEN;
-    (void)RCC->AHB2ENR;
-    /* PB6 = SCL, PB7 = SDA, AF4 (I2C1), 开漏 + 上拉 */
-    GPIOB->MODER = (GPIOB->MODER & ~(GPIO_MODER_MODE6 | GPIO_MODER_MODE7)) |
-                   (2u << GPIO_MODER_MODE6_Pos) | (2u << GPIO_MODER_MODE7_Pos);
-    GPIOB->OTYPER |= GPIO_OTYPER_OT6 | GPIO_OTYPER_OT7;
-    GPIOB->OSPEEDR |= GPIO_OSPEEDR_OSPEED6 | GPIO_OSPEEDR_OSPEED7;
-    GPIOB->PUPDR = (GPIOB->PUPDR & ~(GPIO_PUPDR_PUPD6 | GPIO_PUPDR_PUPD7)) |
-                   GPIO_PUPDR_PUPD6_0 | GPIO_PUPDR_PUPD7_0;
-    GPIOB->AFR[0] = (GPIOB->AFR[0] & ~((0xFu << 24) | (0xFu << 28))) |
-                    (4u << 24) | (4u << 28);               /* AF4 */
+    uint32_t start = DWT->CYCCNT;
+    uint32_t cycles = (i2c_core_clock_hz / 1000000u) * us;
+    while ((uint32_t)(DWT->CYCCNT - start) < cycles) { }
 }
 
-static void i2c_apply_timing(uint32_t timing)
+static void i2c_gpio_init(void)
 {
-    (void)HAL_I2C_DeInit(&i2c);
-    memset(&i2c, 0, sizeof(i2c));
-    i2c.Instance = HOST_I2C_INSTANCE;
-    i2c.Init.Timing = timing;
-    i2c.Init.OwnAddress1 = 0;
-    i2c.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-    i2c.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-    i2c.Init.OwnAddress2 = 0;
-    i2c.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
-    i2c.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-    i2c.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-    (void)HAL_I2C_Init(&i2c);
+    uint32_t mode;
+
+    /* PB6 is UCPD1_CC1 on STM32G431. Disable its dead-battery pull-down before
+       using it as an open-drain I2C clock. */
+    HAL_PWREx_DisableUCPDDeadBattery();
+    RCC->AHB2ENR |= RCC_AHB2ENR_GPIOBEN;
+    (void)RCC->AHB2ENR;
+    /* PB6 has no I2C1_SCL alternate function on STM32G431. Bit-bang both
+       lines as open-drain GPIO instead of routing them to the I2C peripheral. */
+    mode = GPIOB->MODER & ~(GPIO_MODER_MODE6 | GPIO_MODER_MODE7);
+    GPIOB->MODER = mode | (1u << GPIO_MODER_MODE6_Pos) |
+                          (1u << GPIO_MODER_MODE7_Pos);
+    GPIOB->OTYPER |= GPIO_OTYPER_OT6 | GPIO_OTYPER_OT7;
+    GPIOB->OSPEEDR &= ~(GPIO_OSPEEDR_OSPEED6 | GPIO_OSPEEDR_OSPEED7);
+    GPIOB->PUPDR = (GPIOB->PUPDR & ~(GPIO_PUPDR_PUPD6 | GPIO_PUPDR_PUPD7)) |
+                   GPIO_PUPDR_PUPD6_0 | GPIO_PUPDR_PUPD7_0;
+    GPIOB->BSRR = I2C_SCL_PIN | I2C_SDA_PIN;
 }
 
 int imu_i2c_init(void)
 {
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0u;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    i2c_core_clock_hz = HAL_RCC_GetHCLKFreq();
     i2c_gpio_init();
-    __HAL_RCC_I2C1_CLK_ENABLE();
-    i2c_apply_timing(HOST_I2C_TIMING_100K);
-    /* GPIO 之外再做一次显式引脚配置，确保 HAL 不会重置成默认模式 */
-    i2c_gpio_init();
+    last_error = "";
     return 1;
+}
+
+static void scl_low(void) { GPIOB->BSRR = (uint32_t)I2C_SCL_PIN << 16; }
+static void scl_release(void) { GPIOB->BSRR = I2C_SCL_PIN; }
+static void sda_low(void) { GPIOB->BSRR = (uint32_t)I2C_SDA_PIN << 16; }
+static void sda_release(void) { GPIOB->BSRR = I2C_SDA_PIN; }
+
+static int scl_release_and_wait(void)
+{
+    uint32_t start = DWT->CYCCNT;
+    uint32_t timeout = (i2c_core_clock_hz / 1000000u) * I2C_STRETCH_TIMEOUT_US;
+    scl_release();
+    while ((GPIOB->IDR & I2C_SCL_PIN) == 0u) {
+        if ((uint32_t)(DWT->CYCCNT - start) >= timeout) return 0;
+    }
+    i2c_delay_us(I2C_HALF_PERIOD_US);
+    return 1;
+}
+
+static void i2c_stop(void)
+{
+    sda_low();
+    i2c_delay_us(I2C_HALF_PERIOD_US);
+    if (scl_release_and_wait()) {
+        sda_release();
+        i2c_delay_us(I2C_HALF_PERIOD_US);
+    } else {
+        sda_release();
+    }
+}
+
+static int i2c_start(void)
+{
+    sda_release();
+    i2c_delay_us(I2C_HALF_PERIOD_US);
+    if (!scl_release_and_wait()) return 0;
+    if ((GPIOB->IDR & I2C_SDA_PIN) == 0u) return 0;
+    sda_low();
+    i2c_delay_us(I2C_HALF_PERIOD_US);
+    scl_low();
+    i2c_delay_us(I2C_HALF_PERIOD_US);
+    return 1;
+}
+
+static int i2c_write_byte(uint8_t value)
+{
+    unsigned int bit;
+    int ack;
+    for (bit = 0u; bit < 8u; ++bit) {
+        if (value & 0x80u) sda_release(); else sda_low();
+        i2c_delay_us(I2C_HALF_PERIOD_US);
+        if (!scl_release_and_wait()) return 0;
+        scl_low();
+        value <<= 1;
+    }
+    sda_release();
+    i2c_delay_us(I2C_HALF_PERIOD_US);
+    if (!scl_release_and_wait()) return 0;
+    ack = (GPIOB->IDR & I2C_SDA_PIN) == 0u;
+    scl_low();
+    return ack;
+}
+
+static int i2c_read_byte(uint8_t *value, int ack)
+{
+    unsigned int bit;
+    uint8_t result = 0u;
+    sda_release();
+    for (bit = 0u; bit < 8u; ++bit) {
+        result <<= 1;
+        i2c_delay_us(I2C_HALF_PERIOD_US);
+        if (!scl_release_and_wait()) return 0;
+        if (GPIOB->IDR & I2C_SDA_PIN) result |= 1u;
+        scl_low();
+    }
+    if (ack) sda_low(); else sda_release();
+    i2c_delay_us(I2C_HALF_PERIOD_US);
+    if (!scl_release_and_wait()) return 0;
+    scl_low();
+    sda_release();
+    *value = result;
+    return 1;
+}
+
+static int i2c_probe(uint8_t addr)
+{
+    int ack;
+    if (!i2c_start()) return 0;
+    ack = i2c_write_byte((uint8_t)(addr << 1));
+    i2c_stop();
+    return ack;
 }
 
 static int mem_read(uint8_t addr, uint8_t reg, uint8_t *buf, uint16_t len)
 {
-    if (HAL_I2C_Mem_Read(&i2c, (uint16_t)(addr << 1), reg, I2C_MEMADD_SIZE_8BIT,
-                         buf, len, 20u) == HAL_OK) return 1;
-    /* 总线卡住（SDA 被从机拉住）时释放一次：模拟 9 个时钟 + STOP */
-    (void)HAL_I2C_DeInit(&i2c);
-    i2c_gpio_init();
-    i2c_apply_timing(i2c.Init.Timing);
-    return 0;
+    uint16_t i;
+    int ok = i2c_start() && i2c_write_byte((uint8_t)(addr << 1)) &&
+             i2c_write_byte(reg) && i2c_start() &&
+             i2c_write_byte((uint8_t)((addr << 1) | 1u));
+    for (i = 0u; ok && i < len; ++i) {
+        ok = i2c_read_byte(&buf[i], i + 1u < len);
+    }
+    i2c_stop();
+    if (!ok) last_error = "I2C read NACK or SCL timeout";
+    return ok;
 }
 
 static int mem_write(uint8_t addr, uint8_t reg, const uint8_t *buf, uint16_t len)
 {
-    return HAL_I2C_Mem_Write(&i2c, (uint16_t)(addr << 1), reg, I2C_MEMADD_SIZE_8BIT,
-                             (uint8_t *)buf, len, 20u) == HAL_OK;
+    uint16_t i;
+    int ok = i2c_start() && i2c_write_byte((uint8_t)(addr << 1)) &&
+             i2c_write_byte(reg);
+    for (i = 0u; ok && i < len; ++i) ok = i2c_write_byte(buf[i]);
+    i2c_stop();
+    if (!ok) last_error = "I2C write NACK or SCL timeout";
+    return ok;
 }
 
 int imu_scan(uint8_t *found, int max)
 {
     int count = 0;
-    static const uint32_t speeds[3] = { HOST_I2C_TIMING_100K, HOST_I2C_TIMING_50K,
-                                        HOST_I2C_TIMING_10K };
-    for (int s = 0; s < 3; ++s) {
-        i2c_apply_timing(speeds[s]);
-        count = 0;
-        for (uint16_t addr = HOST_IMU_ADDR_SCAN_FIRST; addr <= HOST_IMU_ADDR_SCAN_LAST; ++addr) {
-            /* 单次探测 3 ms：总线上没器件时整轮扫描要在 1 秒内结束，不然开机看着像死机 */
-            if (HAL_I2C_IsDeviceReady(&i2c, (uint16_t)(addr << 1), 1u, 3u) == HAL_OK) {
-                if (count < max) found[count] = (uint8_t)addr;
-                ++count;
-            }
+    for (uint16_t addr = HOST_IMU_ADDR_SCAN_FIRST; addr <= HOST_IMU_ADDR_SCAN_LAST; ++addr) {
+        if (i2c_probe((uint8_t)addr)) {
+            if (count < max) found[count] = (uint8_t)addr;
+            ++count;
         }
-        if (count > 0) return count;
-        last_error = "no I2C device at 100k/50k/10k";
     }
+    if (count == 0) last_error = "no I2C device at 10k GPIO-I2C";
     return count;
 }
 
@@ -101,37 +196,29 @@ int imu_init(ImuInfo *imu)
     uint8_t addr = HOST_IMU_ADDR_PRIMARY;
 
     memset(imu, 0, sizeof(*imu));
-    /* 先按 0x68 找，不行再试 0x69；两档 I2C 速度都试，便于判断是速度问题还是接线问题 */
-    static const uint32_t speeds[3] = { HOST_I2C_TIMING_100K, HOST_I2C_TIMING_50K,
-                                        HOST_I2C_TIMING_10K };
-    for (int s = 0; s < 3; ++s) {
-        i2c_apply_timing(speeds[s]);
-        for (int a = 0; a < 2; ++a) {
-            addr = (a == 0) ? HOST_IMU_ADDR_PRIMARY : HOST_IMU_ADDR_SECONDARY;
-            if (mem_read(addr, HOST_IMU_WHO_AM_I_REG, &who, 1) && who == HOST_IMU_WHO_AM_I_VALUE) {
-                imu->address = addr;
-                imu->who_am_i = who;
-                imu->speed_code = (uint8_t)s;
-                /* bank0 + 加速度/角速度都进低噪声模式 */
-                uint8_t pwr = 0x0Fu;
-                if (!mem_write(addr, REG_PWR_MGMT0, &pwr, 1)) {
-                    last_error = "PWR_MGMT0 write failed";
-                    return 0;
-                }
-                HAL_Delay(40u);                            /* 陀螺需要 ~35 ms 起振 */
-                uint8_t cfg = 0x06u;                       /* gyro: ±2000 dps, 1 kHz ODR */
-                (void)mem_write(addr, REG_GYRO_CONFIG0, &cfg, 1);
-                cfg = 0x06u;                                /* accel: ±16 g, 1 kHz ODR */
-                (void)mem_write(addr, REG_ACCEL_CONFIG0, &cfg, 1);
-                last_error = "";
-                return 1;
+    /* Address strap selects 0x68 or 0x69; WHO_AM_I is a separate register. */
+    for (int a = 0; a < 2; ++a) {
+        addr = (a == 0) ? HOST_IMU_ADDR_PRIMARY : HOST_IMU_ADDR_SECONDARY;
+        if (mem_read(addr, HOST_IMU_WHO_AM_I_REG, &who, 1) && who == HOST_IMU_WHO_AM_I_VALUE) {
+            imu->address = addr;
+            imu->who_am_i = who;
+            imu->speed_code = 0u;
+            /* Bank0: accelerometer and gyroscope low-noise mode. */
+            uint8_t pwr = 0x0Fu;
+            if (!mem_write(addr, REG_PWR_MGMT0, &pwr, 1)) {
+                last_error = "PWR_MGMT0 write failed";
+                return 0;
             }
-            if (who != 0 && who != HOST_IMU_WHO_AM_I_VALUE) {
-                last_error = "WHO_AM_I mismatch (expect 0x67)";
-            }
+            HAL_Delay(50u);                            /* datasheet minimum is 45 ms */
+            uint8_t cfg = 0x06u;                       /* gyro: ±2000 dps, 800 Hz */
+            if (!mem_write(addr, REG_GYRO_CONFIG0, &cfg, 1)) return 0;
+            cfg = 0x06u;                                /* accel: ±16 g, 800 Hz */
+            if (!mem_write(addr, REG_ACCEL_CONFIG0, &cfg, 1)) return 0;
+            last_error = "";
+            return 1;
         }
     }
-    if (!last_error[0]) last_error = "no answer at 0x68/0x69";
+    if (!last_error[0]) last_error = "no answer at 0x68/0x69 or WHO_AM_I mismatch";
     return 0;
 }
 
@@ -297,7 +384,7 @@ static int sw_probe(int swap, uint8_t addr7)
     return ack;
 }
 
-static void sw_scan_bus(int swap, uint32_t *out_count, uint32_t *out_first)
+static void sw_scan_bus(int swap, volatile uint32_t *out_count, volatile uint32_t *out_first)
 {
     uint16_t a;
     uint32_t n = 0u, first = 0u;
@@ -361,8 +448,8 @@ void imu_bus_diag(void)
     bus_diag[3] = GPIOB->IDR & (BUS_SCL | BUS_SDA);
 
     (void)imu_i2c_init();
-    bus_diag[6] = I2C1->ISR;
-    bus_diag[7] = I2C1->TIMINGR;
+    bus_diag[6] = GPIOB->MODER;
+    bus_diag[7] = PWR->CR3;
 }
 
 void imu_bus_diag_scan_result(int found_count, const uint8_t *found){
@@ -374,8 +461,8 @@ void imu_bus_diag_scan_result(int found_count, const uint8_t *found){
     } else {
         bus_diag[5] = 0u;
     }
-    bus_diag[6] = I2C1->ISR;
-    bus_diag[7] = I2C1->TIMINGR;
+    bus_diag[6] = GPIOB->MODER;
+    bus_diag[7] = PWR->CR3;
 }
 
 #if HOST_I2C_PIN_DRIVE_TEST

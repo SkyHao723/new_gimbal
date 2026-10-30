@@ -4,16 +4,21 @@
 #include <stdint.h>
 #include "host_config.h"
 
-/* ICM-42670-P（六轴 IMU）走 I2C1：PB6=SCL / PB7=SDA，AF4，开漏。
+/* PB6/PB7 在 STM32G431 上没有 I2C1 复用功能（PB6=UCPD1_CC1/TIM4/TIM8/TIM16/USART1），
+   所以只能用 GPIO 开漏 bit-bang。半位延时 2us => SCL 250 kHz。 */
+#define IMU_I2C_HALF_PERIOD_US   2u
+
+/* ICM-42670-P（六轴 IMU）走 PB6=SCL / PB7=SDA 软件 I2C，开漏；
+   STM32G431 的 PB6 不支持 I2C1_SCL 复用。
    寄存器按 bank0 直接读，没做 FIFO / 中断，够点板和后续姿态解算用。 */
 
 typedef struct {
     uint8_t address;        /* 0x68 或 0x69 */
     uint8_t who_am_i;
-    uint8_t speed_code;     /* 0=100k 1=50k 2=10k，实际能通上的那一档 */
+    uint8_t speed_code;     /* GPIO bit-bang, 0=10 kHz */
 } ImuInfo;
 
-/* 初始化 I2C1（硬件 I2C）。返回 1 成功，0 失败（失败信息用 imu_last_error()）。 */
+/* 初始化 PB6/PB7 开漏 GPIO I2C。返回 1 成功，0 失败（信息见 imu_last_error()）。 */
 int imu_i2c_init(void);
 
 /* 扫描 0x08..0x77，把有应答的地址写进 found[]，返回个数（最多 max）。 */
@@ -37,8 +42,8 @@ const char *imu_last_error(void);
  *   bus_diag[3] : IDR snapshot after bus-clear (pull-up again)
  *   bus_diag[4] : address scan hit count
  *   bus_diag[5] : first hit address | (second hit << 8)
- *   bus_diag[6] : I2C1->ISR after init/scan
- *   bus_diag[7] : I2C1->TIMINGR after init/scan
+ *   bus_diag[6] : GPIOB->MODER after I2C GPIO setup
+ *   bus_diag[7] : PWR->CR3 (UCPD dead-battery pull-down must be disabled)
  */
 extern volatile uint32_t bus_diag[8];
 /* Software-I2C scan (bypasses the peripheral, tests wiring/address/power):

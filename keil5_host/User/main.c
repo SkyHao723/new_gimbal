@@ -2,7 +2,7 @@
  *
  * Goal: verify the four peripherals on a fresh board with no external code:
  *   1) clock + console UART (CH343P)   2) LED PA5
- *   3) I2C1 + ICM-42670-P (IMU)        4) FDCAN1 + the three driver boards
+ *   3) GPIO I2C + ICM-42670-P (IMU)    4) FDCAN1 + the three driver boards
  *   5) USART2 towards ESP32-S3 (init only, protocol deferred)
  *
  * Console commands (115200 8N1):
@@ -36,7 +36,7 @@ static void print_banner(void)
            (unsigned long)HAL_RCC_GetSysClockFreq(), (unsigned long)HAL_RCC_GetHCLKFreq(),
            (unsigned long)HAL_RCC_GetPCLK1Freq(), (unsigned long)HAL_RCC_GetPCLK2Freq());
     printf("UART1 PA9/PA10 <-> CH343P @ %lu 8N1\r\n", (unsigned long)HOST_CONSOLE_BAUD);
-    printf("I2C1 PB6/PB7 -> ICM-42670-P   FDCAN1 PB8/PB9 @ 500k   LED PA5\r\n");
+    printf("GPIO-I2C PB6/PB7 -> ICM-42670-P   FDCAN1 PB8/PB9 @ 500k   LED PA5\r\n");
     printf("Type h for the command list\r\n");
 }
 
@@ -58,11 +58,11 @@ static void imu_bringup(void)
     uint8_t found[16];
     int n;
 
-    /* 先初始化 I2C1（PB6/PB7 引脚 + 外设 + 100k 时序），否则后面的扫描/读寄存器全是空转 */
+    /* 先初始化 PB6/PB7 软件 I2C，否则后面的扫描/读寄存器全是空转 */
     imu_i2c_init();
 
     /* 先做引脚级总线自检（结果存 RAM，串口打不开也能用 SWD 读 bus_diag[8]），
-       内部会顺带做 9 个时钟的总线解锁并初始化 I2C1 */
+       内部会顺带做 9 个时钟的总线解锁并恢复 GPIO I2C */
     imu_bus_diag();
 
 #if HOST_I2C_PIN_DRIVE_TEST
@@ -73,10 +73,13 @@ static void imu_bringup(void)
     printf("\r\n[I2C] scanning 0x08..0x77 ...\r\n");
     printf("[I2C] bus levels  pu=%02lX pd=%02lX clear=%02lX\r\n",
            (unsigned long)bus_diag[0], (unsigned long)bus_diag[1], (unsigned long)bus_diag[3]);
+    printf("[I2C] GPIO scan PB6=SCL PB7=SDA: %lu device(s), first 0x%02lX; swapped: %lu, first 0x%02lX\r\n",
+           (unsigned long)sw_scan[0], (unsigned long)sw_scan[1],
+           (unsigned long)sw_scan[2], (unsigned long)sw_scan[3]);
     n = imu_scan(found, 16);
     imu_bus_diag_scan_result(n, found);
     if (n <= 0) {
-        printf("[I2C] no device found - check IMU soldering, PB6/PB7 pull-ups, 3V3\r\n");
+        printf("[I2C] no device found - check PB6/PB7 pull-ups, IMU 3V3, AP_CS high, AP_AD0 address\r\n");
         return;
     }
     printf("[I2C] %d address(es):", n);
@@ -86,9 +89,9 @@ static void imu_bringup(void)
         printf("[IMU] init failed: %s\r\n", imu_last_error());
         return;
     }
-    printf("[IMU] OK  addr=0x%02X  WHO_AM_I=0x%02X  I2C clock=%s\r\n",
+    printf("[IMU] OK  addr=0x%02X  WHO_AM_I=0x%02X  I2C = GPIO bit-bang %lu kHz\r\n",
            imu.address, imu.who_am_i,
-           imu.speed_code == 0 ? "100k" : (imu.speed_code == 1 ? "50k" : "10k"));
+           (unsigned long)(500u / IMU_I2C_HALF_PERIOD_US));
     report_imu();
 }
 
@@ -159,6 +162,24 @@ static void can_bringup(void)
     can_scan_drivers();
 }
 
+/* 't' 命令: IMU 连续读压力测试, 用 DWT 计时, 报成功率与单次耗时 */
+static void imu_stress(void)
+{
+    int16_t acc[3], gyr[3], temp = 0;
+    int i, ok = 0;
+    uint32_t t0, t1, cycles;
+    (void)imu_read_raw(&imu, acc, gyr, &temp);        /* warm up once */
+    t0 = DWT->CYCCNT;
+    for (i = 0; i < 200; ++i) {
+        if (imu_read_raw(&imu, acc, gyr, &temp)) ok++;
+    }
+    t1 = DWT->CYCCNT;
+    cycles = t1 - t0;
+    printf("[STRESS] %d/200 OK, total %lu us, %.0f us/read, %.1f Hz max\r\n",
+           ok, (unsigned long)(cycles / (HAL_RCC_GetHCLKFreq() / 1000000u)),
+           cycles / (HAL_RCC_GetHCLKFreq() / 1000000u) / 200.0f,
+           200.0f * (float)HAL_RCC_GetHCLKFreq() / (float)cycles);
+}
 static void print_status(void)
 {
     printf("SYSCLK=%lu  CAN PSR=0x%08lX ECR=0x%08lX rx=%lu busoff=%lu txdrop=%lu\r\n",
@@ -172,12 +193,13 @@ static void print_status(void)
 static void handle_command(char *line)
 {
     if (!strcmp(line, "h") || !strcmp(line, "?")) {
-        printf("h/?: help   i: I2C scan   m: read IMU   n: poll drivers   b: status   l: LED\r\n");
+        printf("h/?: help   i: I2C scan   m: read IMU   t: IMU stress (200 reads)   n: poll drivers   b: status   l: LED\r\n");
         printf("c<N> <cmd>: send to node N, e.g. c1 T0.5 / c2 M1 / c0 V2.5 (c0 = broadcast)\r\n");
         return;
     }
     if (!strcmp(line, "i")) { imu_bringup(); return; }
     if (!strcmp(line, "m")) { report_imu(); return; }
+    if (!strcmp(line, "t")) { imu_stress(); return; }
     if (!strcmp(line, "n")) { can_scan_drivers(); return; }
     if (!strcmp(line, "b")) { print_status(); return; }
     if (!strcmp(line, "l")) { host_led_toggle(); printf("LED toggled\r\n"); return; }
