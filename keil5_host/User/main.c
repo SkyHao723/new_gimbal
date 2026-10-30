@@ -249,9 +249,19 @@ static void print_status(void)
 static void handle_command_body(char *line)
 {
     if (!strcmp(line, "h") || !strcmp(line, "?")) {
-        printf("h/?: help   i: I2C scan   m: read IMU   t: IMU stress   e: ESP link self-test   n: poll drivers   b: status   l: LED\r\n");
-        printf("commands are accepted on BOTH inputs: UART1 (CH343P USB) and UART2 (ESP32); reply goes back to the source\r\n");
-        printf("c<N> <cmd>: send to node N, e.g. c1 T0.5 / c2 M1 / c0 V2.5 (c0 = broadcast)\r\n");
+        printf("\r\n=== upper-board console (UART1 / CH343P USB) ===\r\n");
+        printf("  h / ?        this help\r\n");
+        printf("  b            board status: clock, CAN, UART counters, IMU\r\n");
+        printf("  m            read the IMU once\r\n");
+        printf("  t            IMU stress test (200 reads, timing)\r\n");
+        printf("  i            I2C scan + re-init the IMU\r\n");
+        printf("  n            poll the driver boards on CAN\r\n");
+        printf("  l            toggle the LED\r\n");
+        printf("  e            ESP32 (UART2) link self-test\r\n");
+        printf("  c<N> <cmd>   forward a command to driver board N (0 = broadcast)\r\n");
+        printf("                 c1 T0.5   c1 M1   c1 ?   c0 V2.5\r\n");
+        printf("line editing: ENTER send, BACKSPACE delete, Ctrl-U clear line, Ctrl-C cancel\r\n");
+        printf("commands are accepted on UART1 (USB) and UART2 (ESP32); the reply goes back to the source\r\n");
         return;
     }
     if (!strcmp(line, "i")) { imu_bringup(); return; }
@@ -282,7 +292,7 @@ static void handle_command(char *line, int from_esp)
 
 int main(void)
 {
-    char line[64];
+    char line[96];
     uint32_t next_blink, next_service;
     int guard;
 
@@ -300,13 +310,17 @@ int main(void)
 
     imu_bringup();
     can_bringup();
-    printf("\r\nBring-up checklist done. Compare each line with README; fix the pin for any failure.\r\n");
+    printf("\r\nReady. Type h for help.\r\n");
+    console_prompt();
 
     next_blink = HAL_GetTick() + 500u;
     next_service = HAL_GetTick();
     for (;;) {
         uint32_t now = HAL_GetTick();
-        if (console_read_line(line, sizeof(line))) handle_command(line, 0);
+        if (console_read_line(line, sizeof(line))) {
+            handle_command(line, 0);
+            console_prompt();
+        }
         guard = esp_link_guard(HAL_GetTick());
         if (guard == 2) {
             int saved = console_route();
