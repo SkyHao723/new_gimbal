@@ -315,3 +315,23 @@ Expected exchange once it is flashed:
 ```
 [esp32] G431 is alive: "EN=OFF angle=... dir=-1 zero=1.2270 Vbus=24.0 nFAULT=1"
 ```
+
+## 负载板（旧上位机板）遥测 — 2026-10-31
+
+第二块同款板子被改成 **负载板**（固件在 `../keil5_load/`），挂在 CAN 最末端，
+按 100 Hz 上报自身 ICM-42670-P 的加速度/角速度/温度（CAN ID `0x2A0/0x2A1/0x2A2`）。
+
+- 上位机固件用 `k` 命令打印最新一帧：`[LOAD] seq=.. age=..ms frames=.. samples=.. rate=..Hz on=.. imu=..` 与 `[LOAD] acc[g] ... gyro[dps] ... temp=.. C`。
+- 网页控制台 `tools/host_console/` 新增「负载板 IMU」卡片，自动轮询里也会带上 `k`。
+- 首帧分析：`k` 解析在 `load_handle_frame()`（`can_poll_replies()` 里先判断 0x2A0~0x2A2，命中就不当文本转发）。
+
+### 负载板 CAN 发送全失败的问题（已解决）
+
+现象：负载板 `PSR` 报 `LEC=5`（bit0 错误）、`TEC=248`、进 bus-off，`tx_fail` 持续增长；
+接上它以后总线静态电压从 2.5 V 掉到 1.5/1.7 V。
+
+排查：固件侧用 `can_selftest[]` 证明内部/外部回环都通过；再用 `LOAD_DISABLE_CAN=1`
+（完全不初始化 FDCAN、PB5/PB8/PB9 保持模拟输入）重烧，接上总线**仍然被拉低** →
+与固件无关。更换板上的 **TJA1042** 后一切正常（`PSR=0x708`、`tx_fail=0`）。
+
+详细记录见 `../keil5_load/README.md` 第 5 节。

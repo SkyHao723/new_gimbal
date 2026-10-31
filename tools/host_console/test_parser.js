@@ -28,6 +28,18 @@ const CAPTURE_BOARD = [
   "> ",
 ].join("\r\n");
 
+const CAPTURE_LOAD = [
+  "k",
+  "[LOAD] seq=42 age=12ms frames=980 samples=490 rate=100Hz on=1 imu=1",
+  "[LOAD] acc[g] 0.004 -0.011 0.998  gyro[dps] -0.3 0.1 0.4  temp=28 C",
+  "> ",
+  ].join("\r\n");
+
+const CAPTURE_LOAD_EMPTY = [
+  "k",
+  "[LOAD] no telemetry yet - check load board 5V, CANH/CANL wiring, board power",
+  "> ",
+  ].join("\r\n");
 const CAPTURE_IMU = [
   "m",
   "IMU acc[g] -0.000 0.028 1.021   gyro[dps] -0.3 0.1 0.4   temp 30.5 C",
@@ -134,6 +146,8 @@ function check(name, ok, extra) {
   feed(CAPTURE_SCAN);
   await send("c2 ?");
   feed(CAPTURE_NODE2);
+  await send("k");
+  feed(CAPTURE_LOAD);
 
   check("板级 SYSCLK", getEl("vClock").textContent === "170000000", getEl("vClock").textContent);
   check("板级 CAN PSR", getEl("vPsr").textContent === "0x0000070F", getEl("vPsr").textContent);
@@ -142,6 +156,15 @@ function check(name, ok, extra) {
   check("IMU 加速度", getEl("vAcc").textContent === "-0.000 0.028 1.021", getEl("vAcc").textContent);
   check("IMU 角速度", getEl("vGyro").textContent === "-0.3 0.1 0.4", getEl("vGyro").textContent);
   check("IMU 温度", getEl("vTemp").textContent === "30.5 °C", getEl("vTemp").textContent);
+
+  check("负载板 年龄", getEl("loadAge").textContent.includes("实时"), getEl("loadAge").textContent);
+  check("负载板 速率/帧", getEl("loadRate").textContent === "100 Hz / 980 帧", getEl("loadRate").textContent);
+  check("负载板 加速度", getEl("loadAcc").textContent === "0.004 -0.011 0.998", getEl("loadAcc").textContent);
+  check("负载板 角速度", getEl("loadGyro").textContent === "-0.3 0.1 0.4", getEl("loadGyro").textContent);
+  check("负载板 温度", getEl("loadTemp").textContent === "28 °C", getEl("loadTemp").textContent);
+  check("负载板 序号", getEl("loadSeq").textContent === "42", getEl("loadSeq").textContent);
+  feed(CAPTURE_LOAD_EMPTY);
+  check("负载板 无数据提示", getEl("loadAge").textContent.includes("收不到"), getEl("loadAge").textContent);
 
   check("1 号板 失能", roles.get("node1|en").textContent === "失能", roles.get("node1|en").textContent);
   check("1 号板 nFAULT 正常", roles.get("node1|fault").textContent.includes("✓"), roles.get("node1|fault").textContent);

@@ -32,6 +32,99 @@ static ImuInfo imu;
 static uint32_t cmd_from_usb;
 static uint32_t cmd_from_esp;
 
+/* ---- Load board (the old host board at the far end of the bus) -----------
+ * It streams its own IMU over CAN:
+ *   0x2A0  [0]=seq [1..2]=ax [3..4]=ay [5..6]=az  (int16 LE, mg) [7]=imu_ok
+ *   0x2A1  [0]=seq [1..2]=gx [3..4]=gy [5..6]=gz  (int16 LE, 0.1 dps) [7]=temp C
+ *   0x2A2  [0..1]=rate_hz [2]=telemetry_on [3]=imu_ok [4..7]=samples
+ */
+#define LOAD_CAN_ID_ACC     0x2A0u
+#define LOAD_CAN_ID_GYRO    0x2A1u
+#define LOAD_CAN_ID_STATUS  0x2A2u
+
+typedef struct {
+    uint8_t  valid;
+    uint8_t  seq;
+    uint8_t  imu_ok;
+    int16_t  acc_mg[3];
+    int16_t  gyro_tenth_dps[3];
+    int8_t   temp_c;
+    uint16_t rate_hz;
+    uint8_t  telemetry_on;
+    uint32_t samples;
+    uint32_t frames;
+    uint32_t last_ms;
+} LoadState;
+
+static LoadState load;
+
+static int16_t load_get_i16(const uint8_t *src)
+{
+    return (int16_t)((uint16_t)src[0] | ((uint16_t)src[1] << 8));
+}
+
+/* Returns 1 when the frame belonged to the load board (and was consumed). */
+static int load_handle_frame(const CanFrame *f)
+{
+    uint32_t now = HAL_GetTick();
+
+    switch (f->id) {
+    case LOAD_CAN_ID_ACC:
+        if (f->dlc < 8u) {
+            return 1;
+        }
+        load.seq = f->data[0];
+        load.acc_mg[0] = load_get_i16(&f->data[1]);
+        load.acc_mg[1] = load_get_i16(&f->data[3]);
+        load.acc_mg[2] = load_get_i16(&f->data[5]);
+        load.imu_ok = f->data[7];
+        load.valid = 1u;
+        load.last_ms = now;
+        ++load.frames;
+        return 1;
+    case LOAD_CAN_ID_GYRO:
+        if (f->dlc < 8u) {
+            return 1;
+        }
+        load.gyro_tenth_dps[0] = load_get_i16(&f->data[1]);
+        load.gyro_tenth_dps[1] = load_get_i16(&f->data[3]);
+        load.gyro_tenth_dps[2] = load_get_i16(&f->data[5]);
+        load.temp_c = (int8_t)f->data[7];
+        return 1;
+    case LOAD_CAN_ID_STATUS:
+        if (f->dlc < 8u) {
+            return 1;
+        }
+        load.rate_hz = (uint16_t)((uint16_t)f->data[0] | ((uint16_t)f->data[1] << 8));
+        load.telemetry_on = f->data[2];
+        load.samples = (uint32_t)f->data[4] | ((uint32_t)f->data[5] << 8)
+                     | ((uint32_t)f->data[6] << 16) | ((uint32_t)f->data[7] << 24);
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static void report_load(void)
+{
+    uint32_t age;
+
+    if (!load.valid) {
+        printf("[LOAD] no telemetry yet - check load board 5V, CANH/CANL wiring, board power\r\n");
+        return;
+    }
+    age = HAL_GetTick() - load.last_ms;
+    printf("[LOAD] seq=%u age=%lums frames=%lu samples=%lu rate=%uHz on=%u imu=%u\r\n",
+           (unsigned)load.seq, (unsigned long)age, (unsigned long)load.frames,
+           (unsigned long)load.samples, (unsigned)load.rate_hz,
+           (unsigned)load.telemetry_on, (unsigned)load.imu_ok);
+    printf("[LOAD] acc[g] %.3f %.3f %.3f  gyro[dps] %.1f %.1f %.1f  temp=%d C\r\n",
+           (double)load.acc_mg[0] / 1000.0, (double)load.acc_mg[1] / 1000.0,
+           (double)load.acc_mg[2] / 1000.0,
+           (double)load.gyro_tenth_dps[0] / 10.0, (double)load.gyro_tenth_dps[1] / 10.0,
+           (double)load.gyro_tenth_dps[2] / 10.0, (int)load.temp_c);
+}
+
 static void print_banner(void)
 {
     printf("\r\n===== G431 host board bring-up =====\r\n");
@@ -151,7 +244,11 @@ static void can_poll_replies(void)
 {
     CanFrame f;
     uint32_t now = HAL_GetTick();
-    while (can_host_recv(&f)) can_append_frame(&f, now);
+    while (can_host_recv(&f)) {
+        if (!load_handle_frame(&f)) {
+            can_append_frame(&f, now);
+        }
+    }
     can_flush_idle(now);
 }
 
@@ -284,6 +381,7 @@ static void handle_command_body(char *line)
         printf("  t            IMU stress test (200 reads, timing)\r\n");
         printf("  i            I2C scan + re-init the IMU\r\n");
         printf("  n            poll the driver boards on CAN\r\n");
+        printf("  k            load board (old host board) IMU telemetry\r\n");
         printf("  l            toggle the LED\r\n");
         printf("  e            ESP32 (UART2) link self-test\r\n");
         printf("  c<N> <cmd>   forward a command to driver board N (0 = broadcast)\r\n");
@@ -297,6 +395,7 @@ static void handle_command_body(char *line)
     if (!strcmp(line, "t")) { imu_stress(); return; }
     if (!strcmp(line, "e")) { esp_link_selftest(); return; }
     if (!strcmp(line, "n")) { can_scan_drivers(); return; }
+    if (!strcmp(line, "k")) { report_load(); return; }
     if (!strcmp(line, "b")) { print_status(); return; }
     if (!strcmp(line, "l")) { host_led_toggle(); printf("LED toggled\r\n"); return; }
     if (line[0] == 'c' && line[1] >= '0' && line[1] <= '7' && line[2] == ' ') {

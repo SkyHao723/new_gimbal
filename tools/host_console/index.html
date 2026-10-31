@@ -113,6 +113,7 @@
           <button class="mini" data-cmd="m">读 IMU m</button>
           <button class="mini" data-cmd="n">广播巡检 n</button>
           <button class="mini" data-cmd="l">翻灯 l</button>
+          <button class="mini" data-cmd="k">负载板 k</button>
         </div>
         <div class="sep"></div>
         <div class="row">
@@ -122,7 +123,7 @@
           <button class="mini" data-cmd="c0 ?">全部状态</button>
         </div>
         <div class="row">
-          <label class="chk"><input type="checkbox" id="autoPoll" /> 每 2 秒自动刷新三块板</label>
+          <label class="chk"><input type="checkbox" id="autoPoll" /> 每 2 秒自动刷新三块板 + 负载板</label>
         </div>
       </div>
     </section>
@@ -208,6 +209,18 @@
           <div class="val" data-role="vlim">上限 —</div>
           <div class="val" data-role="pk">电流 —</div>
         </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>负载板 IMU <span class="muted" id="loadHint">—</span></h2>
+      <div class="body kv" id="loadState">
+        <div><span class="k">数据</span><span class="v" id="loadAge">—</span></div>
+        <div><span class="k">加速度 g</span><span class="v" id="loadAcc">—</span></div>
+        <div><span class="k">角速度 dps</span><span class="v" id="loadGyro">—</span></div>
+        <div><span class="k">温度</span><span class="v" id="loadTemp">—</span></div>
+        <div><span class="k">速率/帧</span><span class="v" id="loadRate">—</span></div>
+        <div><span class="k">序号</span><span class="v" id="loadSeq">—</span></div>
       </div>
     </section>
   </div>
@@ -419,6 +432,32 @@ function parse(line) {
     return;
   }
 
+  // 负载板遥测：两行
+  //   [LOAD] seq=12 age=35ms frames=980 samples=490 rate=100Hz on=1 imu=1
+  //   [LOAD] acc[g] 0.001 -0.004 0.998  gyro[dps] 0.3 -0.5 0.2  temp=28 C
+  if (/\[LOAD\]/.test(line)) {
+    if ((m = line.match(/seq=(\d+)\s+age=(\d+)ms\s+frames=(\d+)\s+samples=(\d+)\s+rate=(\d+)Hz\s+on=(\d)\s+imu=(\d)/))) {
+      const age = parseInt(m[2], 10);
+      $("loadHint").textContent = new Date().toLocaleTimeString();
+      $("loadAge").textContent = age < 500 ? "实时 (" + age + " ms)" : age + " ms 前（老化）";
+      $("loadRate").textContent = m[5] + " Hz / " + m[3] + " 帧";
+      $("loadSeq").textContent = m[1] + (m[7] === "1" ? "" : "  (IMU 异常)");
+      $("loadSeq").className = "v " + (m[7] === "1" ? "ok" : "bad");
+      return;
+    }
+    m = line.match(new RegExp("acc\\[g\\]\\s+" + NUM + "\\s+" + NUM + "\\s+" + NUM));
+    if (m) $("loadAcc").textContent = m[1] + " " + m[2] + " " + m[3];
+    m = line.match(new RegExp("gyro\\[dps\\]\\s+" + NUM + "\\s+" + NUM + "\\s+" + NUM));
+    if (m) $("loadGyro").textContent = m[1] + " " + m[2] + " " + m[3];
+    m = line.match(new RegExp("temp=-?" + NUM));
+    if (m) $("loadTemp").textContent = m[1] + " °C";
+    if (/no telemetry yet/.test(line)) {
+      $("loadHint").textContent = "无数据";
+      $("loadAge").textContent = "收不到负载板遥测";
+    }
+    return;
+  }
+
   // 巡检 / 异步回复都带节点前缀：  [0x281] EN=OFF ...   或   [N1] EN=OFF ...
   let prefixNode = null;
   m = line.match(/^\s*\[0x28([1-7])\]\s*(.*)$/);
@@ -584,6 +623,7 @@ $("autoPoll").onchange = async () => {
       await send("c" + n + " ?");
       await new Promise((r) => setTimeout(r, 140));
     }
+    await send("k");   // load board telemetry
   };
   tick();
   autoPollTimer = setInterval(tick, 2000);

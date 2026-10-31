@@ -120,8 +120,7 @@ int can_host_recv(CanFrame *frame)
     return 1;
 }
 
-uint32_t can_host_rx_count(void) { return rx_count; }
-uint32_t can_host_tx_dropped(void) { return tx_dropped; }
+uint32_t can_host_rx_count(void) { return rx_count; }uint32_t can_host_tx_dropped(void) { return tx_dropped; }
 uint32_t can_host_bus_off_count(void) { return bus_off_count; }
 uint32_t can_host_error_count(void) { return can.Instance->ECR; }
 uint32_t can_host_psr(void) { return can.Instance->PSR; }
@@ -210,4 +209,96 @@ int can_host_send_command(uint8_t node, const char *text)
         return can_host_send(id, data, 5u);
     }
     return 0;
+}
+
+/* ---- 内部回环自测（判断"MCU 侧 FDCAN 是否正常"用）---------------------
+ * 用 HAL 完整切换模式：DeInit -> Init(mode) -> 过滤器 -> Start。
+ * 早先只在寄存器上点 TEST/LBCK，实测切不过去（PSR 仍报 LEC=5 bit0 错误、
+ * 自己也收不到帧），所以改成 HAL 正规路径。
+ * out[0]=模式切换是否成功 out[1]=发送是否入队 out[2]=是否收到
+ * out[3..5]=收到的 id/dlc/首字节 out[6]=测试前 PSR out[7]=测试后 PSR
+ * out[8]=测试后 ECR out[9]=回环时 CCCR out[10]=回环时 TEST
+ * 返回 1 表示回环成功（说明 FDCAN 内核与引脚配置没问题）。 */
+static int can_set_mode(uint32_t mode)
+{
+    started = 0;
+    (void)HAL_FDCAN_DeInit(&can);
+    can.Init.Mode = mode;
+    if (HAL_FDCAN_Init(&can) != HAL_OK) return 0;
+    HAL_NVIC_SetPriority(FDCAN1_IT0_IRQn, 1u, 0u);
+    HAL_NVIC_EnableIRQ(FDCAN1_IT0_IRQn);
+    return can_start();
+}
+
+int can_host_loopback_test(uint32_t *out)
+{
+    const uint8_t payload[8] = {0xA5u, 0x5Au, 1u, 2u, 3u, 4u, 5u, 6u};
+    CanFrame f;
+    uint32_t psr_before;
+    uint32_t guard;
+    int mode_ok;
+    int sent = 0;
+    int got = 0;
+
+    if (out == NULL) return 0;
+    psr_before = can.Instance->PSR;
+
+    mode_ok = can_set_mode(FDCAN_MODE_INTERNAL_LOOPBACK);
+    out[9] = can.Instance->CCCR;
+    out[10] = can.Instance->TEST;
+
+    if (mode_ok) {
+        sent = can_host_send(0x321u, payload, 8u);
+        for (guard = 0u; guard < 200000u; guard++) {
+            can_host_service();
+            if (can_host_recv(&f)) {
+                got = 1;
+                break;
+            }
+        }
+    }
+
+    out[0] = (uint32_t)mode_ok;
+    out[1] = (uint32_t)sent;
+    out[2] = (uint32_t)got;
+    out[3] = got ? f.id : 0u;
+    out[4] = got ? (uint32_t)f.dlc : 0u;
+    out[5] = got ? (uint32_t)f.data[0] : 0u;
+    out[6] = psr_before;
+    out[7] = can.Instance->PSR;
+    out[8] = can.Instance->ECR;
+
+    (void)can_set_mode(FDCAN_MODE_NORMAL);
+    return got;
+}
+
+/* 外部回环：核心真的驱动总线（经收发器），但 RX 内部自环，不需要别的节点 ACK。
+ * 用来区分"发送通路/收发器坏"与"接收通路（RXD）坏"：
+ *   external OK  -> 收发器能驱动总线，问题在 RXD 回读（收发器 RX 脚/焊接）
+ *   external 也失败 -> 收发器没电/损坏或 TXD 走线断
+ * 结果写 out[11]。 */
+int can_host_external_loopback_test(uint32_t *out)
+{
+    const uint8_t payload[8] = {0x5Au, 0xA5u, 7u, 8u, 9u, 10u, 11u, 12u};
+    CanFrame f;
+    uint32_t guard;
+    int mode_ok;
+    int sent = 0;
+    int got = 0;
+
+    if (out == NULL) return 0;
+    mode_ok = can_set_mode(FDCAN_MODE_EXTERNAL_LOOPBACK);
+    if (mode_ok) {
+        sent = can_host_send(0x322u, payload, 8u);
+        for (guard = 0u; guard < 200000u; guard++) {
+            can_host_service();
+            if (can_host_recv(&f)) {
+                got = 1;
+                break;
+            }
+        }
+    }
+    out[11] = ((uint32_t)mode_ok << 2) | ((uint32_t)sent << 1) | (uint32_t)got;
+    (void)can_set_mode(FDCAN_MODE_NORMAL);
+    return got;
 }

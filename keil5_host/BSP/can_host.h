@@ -34,4 +34,8 @@ uint32_t can_host_psr(void);
    返回 1 成功，0 命令格式不对。 */
 int can_host_send_command(uint8_t node, const char *text);
 
+/* Internal-loopback self test (register level, no HAL re-init). */
+int can_host_loopback_test(uint32_t *out);
+int can_host_external_loopback_test(uint32_t *out);
+
 #endif
