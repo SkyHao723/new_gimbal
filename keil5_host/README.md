@@ -122,6 +122,25 @@ IMU acc[g] 0.00 0.00 1.00   gyro[dps] 0.0 0.0 0.0   temp 25.0 C        <- 平放
 
 ## 7. 已排除的上板问题
 
+### CAN 一有中断就整板死机（2026-10-31，已修）
+
+- 现象：上电一切正常（横幅、`b`、`m` 都有输出），但一旦 CAN 总线上有活动（例如三块驱动板接好后回包），
+  板子立刻**彻底失联**：串口再无任何输出、`uwTick` 停止增长。
+- 定位：用 pyocd 暂停内核读 `PC=0x08000206`、`xPSR=0x01000025`（IPSR=0x25 → 异常号 37 → **IRQ21 = FDCAN1_IT0**）。
+  `0x08000206` 正是启动文件里 `ADC1_2_IRQHandler` 那个 `b .` —— 也就是**启动文件的 weak 默认死循环**。
+  `can_host_init()` 里只调了 `HAL_NVIC_EnableIRQ(FDCAN1_IT0_IRQn)`，但本工程没有 `stm32g4xx_it.c`，
+  从来没有定义 `FDCAN1_IT0_IRQHandler` → 第一个 CAN 中断就跳进 weak 默认处理。
+- 修复：`BSP/can_host.c` 末尾补
+  ```c
+  void FDCAN1_IT0_IRQHandler(void) { HAL_FDCAN_IRQHandler(&can); }
+  void FDCAN1_IT1_IRQHandler(void) { can.Instance->IR = 0xFFFFFFFFu; }
+  ```
+- 教训：**EnableIRQ 之前必须确认同一工程里有同名 handler**（`nm` 里能看到 `T FDCAN1_IT0_IRQHandler`）；
+  否则表现为"偶发死机"，且只有外设在特定时刻触发中断时才复现。
+- 顺带改进：三个节点的回包原本按"同一 CAN ID 连续"分组，三块板同时回包时会互相打断成碎片；
+  现在改为**每节点一个行缓冲**，按 `\n` 或 40 ms 静默成行输出，前缀 `[N1] / [N2] / [N3]`；
+  主循环每轮 `can_poll_replies()`，所以 `c<N> <cmd>` 的回包也能异步打印，网页可以实时解析。
+
 ### ICM-42670-P I2C 无应答（2026-10-30，已在板验证）
 
 - G431CBTx 的 PB6 复用表没有 `I2C1_SCL`，因此原硬件 I2C 配置不会在 PB6 输出时钟。已改为 PB6/PB7 开漏 GPIO、10 kHz 软件 I2C。
