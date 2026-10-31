@@ -99,15 +99,69 @@ static void imu_bringup(void)
     report_imu();
 }
 
-/* Broadcast '?' and print whatever the driver boards answer, grouped per CAN ID. */
+/* Broadcast '?' and print whatever the driver boards answer.
+   Each driver streams its printf output as a run of 8-byte CAN frames, and the
+   three boards reply at the same time, so the frames interleave. Keep one line
+   buffer per node and print a whole line when it is complete ('\n') or the node
+   has been quiet for 40 ms. */
+#define CAN_LINE_SLOTS 8u
+static char can_line[CAN_LINE_SLOTS][200];
+static unsigned can_line_len[CAN_LINE_SLOTS];
+static uint32_t can_line_ms[CAN_LINE_SLOTS];
+
+static unsigned can_slot_of(uint32_t id)
+{
+    if (id >= 0x281u && id <= 0x287u) return id - 0x280u;
+    return (id == 0u) ? 0u : (CAN_LINE_SLOTS - 1u);
+}
+
+static void can_flush_slot(unsigned slot)
+{
+    if (can_line_len[slot] == 0u) return;
+    can_line[slot][can_line_len[slot]] = 0;
+    printf("[N%u] %s\r\n", slot, can_line[slot]);
+    can_line_len[slot] = 0u;
+}
+
+static void can_flush_idle(uint32_t now)
+{
+    unsigned i;
+    for (i = 1u; i < CAN_LINE_SLOTS; i++) {
+        if (can_line_len[i] != 0u && (now - can_line_ms[i]) > 40u) can_flush_slot(i);
+    }
+}
+
+static void can_append_frame(const CanFrame *f, uint32_t now)
+{
+    unsigned slot = can_slot_of(f->id);
+    unsigned k;
+    for (k = 0u; k < f->dlc; k++) {
+        char ch = (char)f->data[k];
+        if (ch == '\r') continue;
+        if (ch == '\n') { can_flush_slot(slot); continue; }
+        if (can_line_len[slot] >= sizeof(can_line[0]) - 1u) can_flush_slot(slot);
+        can_line[slot][can_line_len[slot]++] = ch;
+    }
+    can_line_ms[slot] = now;
+}
+
+/* Drain the receive ring and print complete lines. Called from the main loop, so
+   replies to 'c<N> <cmd>' show up without blocking. */
+static void can_poll_replies(void)
+{
+    CanFrame f;
+    uint32_t now = HAL_GetTick();
+    while (can_host_recv(&f)) can_append_frame(&f, now);
+    can_flush_idle(now);
+}
+
 static void can_scan_drivers(void)
 {
-    uint32_t t0, last_ms;
-    uint32_t cur_id = 0xFFFFFFFFu;
-    char buf[256];
-    unsigned blen = 0;
+    uint32_t t0;
     int printed = 0;
-    CanFrame f;
+    unsigned i;
+
+    for (i = 0u; i < CAN_LINE_SLOTS; i++) { can_line_len[i] = 0u; can_line_ms[i] = 0u; }
 
     if (!can_host_send_command(0u, "?")) {
         printf("[CAN] send failed (bus not ready)\r\n");
@@ -117,42 +171,16 @@ static void can_scan_drivers(void)
            (unsigned long)can_host_psr(), (unsigned long)can_host_error_count());
 
     t0 = HAL_GetTick();
-    last_ms = t0;
     for (;;) {
         uint32_t now = HAL_GetTick();
         can_host_service();
-        while (can_host_recv(&f)) {
-            if (f.id != cur_id || blen + f.dlc > sizeof(buf) - 1u) {
-                if (blen > 0) {
-                    buf[blen] = 0;
-                    printf("  [0x%03lX] %s\r\n", (unsigned long)cur_id, buf);
-                    ++printed;
-                }
-                cur_id = f.id;
-                blen = 0;
-            }
-            memcpy(&buf[blen], f.data, f.dlc);
-            blen += f.dlc;
-            last_ms = now;
-        }
-        /* 一个节点的回复是一串 8 字节帧，静默 30 ms 视为该节点说完 */
-        if (blen > 0 && (now - last_ms) > 30u) {
-            buf[blen] = 0;
-            printf("  [0x%03lX] %s\r\n", (unsigned long)cur_id, buf);
-            ++printed;
-            blen = 0;
-            cur_id = 0xFFFFFFFFu;
-        }
+        can_poll_replies();
         if ((now - t0) > 2000u) break;
     }
-    if (blen > 0) {
-        buf[blen] = 0;
-        printf("  [0x%03lX] %s\r\n", (unsigned long)cur_id, buf);
-        ++printed;
+    for (i = 1u; i < CAN_LINE_SLOTS; i++) {
+        if (can_line_len[i] != 0u) { can_flush_slot(i); ++printed; }
     }
-    if (printed == 0) {
-        printf("  no reply: check CANH/CANL wiring, 120 ohm termination, driver board power\r\n");
-    }
+    (void)printed;
 }
 
 static void can_bringup(void)
@@ -330,6 +358,7 @@ int main(void)
         }
         if (!guard && esp_link_read_line(line, sizeof(line))) handle_command(line, 1);
         if (now >= next_service) { can_host_service(); next_service = now + 20u; }
+        can_poll_replies();
         if (now >= next_blink) {
             host_led_toggle();
             next_blink = now + 500u;

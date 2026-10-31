@@ -164,6 +164,24 @@ void can_host_service(void)
     }
 }
 
+/* ---- 中断入口 ----------------------------------------------------------
+   本工程没有 stm32g4xx_it.c，中断入口必须自己提供。之前只在 can_host_init()
+   里 HAL_NVIC_EnableIRQ(FDCAN1_IT0_IRQn) 却没有定义 handler，结果第一个 CAN
+   中断就跳进启动文件里的 weak 默认死循环（实测 PC=0x08000206、IPSR=0x25，
+   即 IRQ21=FDCAN1_IT0），表现为"整板失联、串口无输出、uwTick 不再增加"。
+   教训：EnableIRQ 之前必须确认同一工程里有同名 handler。 */
+void FDCAN1_IT0_IRQHandler(void)
+{
+    HAL_FDCAN_IRQHandler(&can);
+}
+
+/* 只用中断线 0；万一硬件把线 1 的标志置起来，也在这里清掉，
+   避免再落进启动文件的 weak 死循环。 */
+void FDCAN1_IT1_IRQHandler(void)
+{
+    can.Instance->IR = 0xFFFFFFFFu;
+}
+
 /* ---- 命令编码（与驱动板 can_commands.c 的线格式一致） ---- */
 static const char *single_byte_ops = "ED?RH";
 

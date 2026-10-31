@@ -419,9 +419,10 @@ function parse(line) {
     return;
   }
 
-  // 巡检带前缀：  [0x281] EN=OFF angle=... 
+  // 巡检 / 异步回复都带节点前缀：  [0x281] EN=OFF ...   或   [N1] EN=OFF ...
   let prefixNode = null;
   m = line.match(/^\s*\[0x28([1-7])\]\s*(.*)$/);
+  if (!m) m = line.match(/^\s*\[N([1-7])\]\s*(.*)$/);
   if (m) {
     prefixNode = parseInt(m[1], 10);
     line = m[2];
